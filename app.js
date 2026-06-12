@@ -1,4 +1,4 @@
-// Version 41 (Parametric Orbit Integration)
+// Version 40
 document.addEventListener('DOMContentLoaded', async () => {
 
     // ========================================================
@@ -179,13 +179,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // APPLICATION STATE
     // ========================================================
     let currentMode = 'select'; 
-    let waypoints = []; // Stores both 'waypoint' and 'smooth-orbit' objects
+    let waypoints = [];
     let pois = [];
     let actionStack = []; 
     let selectedWpIds = []; 
     
     let orbitStep = 0, orbitCenterLatLng = null, currentOrbitRadius = 30;
-    let smoothOrbitStep = 0, smoothOrbitCenterLatLng = null;
     let gridStep = 0, gridCenterLatLng = null;
 
     let previewEntities = []; 
@@ -196,15 +195,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const exportLitchiBtn = document.getElementById('export-litchi-btn');
     
     const orbitSettingsPanel = document.getElementById('orbit-settings');
-    const smoothOrbitSettingsPanel = document.getElementById('smooth-orbit-settings');
     const gridSettingsPanel = document.getElementById('grid-settings');
-    
     const radiusInputEl = document.getElementById('orbit-radius');
-    const smoothRadiusInputEl = document.getElementById('smooth-orbit-radius');
-    
     const globalSpeedEl = document.getElementById('global-speed');
     const finishActionEl = document.getElementById('finish-action');
-    
     const simBtn = document.getElementById('sim-btn');
     const simControls = document.getElementById('sim-controls');
     const simStopBtn = document.getElementById('sim-stop-btn');
@@ -225,7 +219,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     function setMode(mode) {
         currentMode = mode;
         orbitSettingsPanel.style.display = (mode === 'orbit') ? 'block' : 'none';
-        smoothOrbitSettingsPanel.style.display = (mode === 'smooth-orbit') ? 'block' : 'none';
         gridSettingsPanel.style.display = (mode === 'grid') ? 'block' : 'none';
         
         document.querySelectorAll('.mode-toolbar-btn').forEach(btn => {
@@ -234,7 +227,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
 
         if (orbitStep === 1) { orbitStep = 0; orbitCenterLatLng = null; clearPreviews(); }
-        if (smoothOrbitStep === 1) { smoothOrbitStep = 0; smoothOrbitCenterLatLng = null; clearPreviews(); }
         if (gridStep === 1) { gridStep = 0; gridCenterLatLng = null; clearPreviews(); }
     }
     
@@ -243,51 +235,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     globalSpeedEl.addEventListener('input', () => updateUI());
-
-    // ========================================================
-    // EXPANDED WAYPOINT GENERATOR (Core Parametric Translator)
-    // ========================================================
-    // Converts UI state (which includes Parametric Orbits) into dense 
-    // discrete waypoints needed for Simulation and Export.
-    function expandMission() {
-        let expanded = [];
-        let globalSpeed = parseFloat(globalSpeedEl.value) || 5;
-
-        waypoints.forEach(wp => {
-            if (wp.type === 'smooth-orbit') {
-                const pts = 36; // 10 degree increments for smoothness
-                for (let i = 0; i < pts; i++) {
-                    const angleRad = ((360 / pts) * i) * (Math.PI / 180);
-                    const earthRadius = 6378137;
-                    const pLat = wp.lat + ((wp.radius * Math.cos(angleRad)) / earthRadius) * (180 / Math.PI);
-                    const pLng = wp.lng + ((wp.radius * Math.sin(angleRad)) / earthRadius) * (180 / Math.PI) / Math.cos(wp.lat * Math.PI / 180);
-
-                    const horizDist = wp.radius;
-                    const wpAbsAlt = wp.altitude + (wp._groundHeight || 0);
-                    const poiAbsAlt = (wp._groundHeight || 0); 
-                    const altDiff = poiAbsAlt - wpAbsAlt;
-                    const pitchDeg = (Math.atan2(altDiff, horizDist) * 180) / Math.PI;
-
-                    expanded.push({
-                        ...wp,
-                        isVirtual: true,
-                        lat: pLat,
-                        lng: pLng,
-                        altitude: wp.altitude,
-                        speed: wp.speed || globalSpeed,
-                        curveRadius: wp.radius * 0.15, // Damping distance to smooth the corners
-                        calculatedPitch: pitchDeg,
-                        linkedPoiId: 'virtual', 
-                        virtualPoi: { lat: wp.lat, lng: wp.lng, altitude: 0 },
-                        actions: i === 0 ? wp.actions : [] // Only trigger actions on entry
-                    });
-                }
-            } else {
-                expanded.push(wp);
-            }
-        });
-        return expanded;
-    }
 
     // ========================================================
     // FLOATING EDITOR & HUD LOGIC
@@ -302,24 +249,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         let totalDist = 0;
         let totalTime = 0;
         const baseSpeed = parseFloat(globalSpeedEl.value) || 5;
-        const flightPath = expandMission();
 
-        for (let i = 0; i < flightPath.length - 1; i++) {
-            const dist = getDistance(flightPath[i].lat, flightPath[i].lng, flightPath[i+1].lat, flightPath[i+1].lng);
+        for (let i = 0; i < waypoints.length - 1; i++) {
+            const dist = getDistance(waypoints[i].lat, waypoints[i].lng, waypoints[i+1].lat, waypoints[i+1].lng);
             totalDist += dist;
-            const legSpeed = flightPath[i].speed ? flightPath[i].speed : baseSpeed;
+            const legSpeed = waypoints[i].speed ? waypoints[i].speed : baseSpeed;
             totalTime += (dist / legSpeed);
-            flightPath[i].actions.forEach(a => { if(a.type === 'hover') totalTime += parseFloat(a.param) || 0; });
+            waypoints[i].actions.forEach(a => { if(a.type === 'hover') totalTime += parseFloat(a.param) || 0; });
         }
         
-        if (flightPath.length > 0) {
-            flightPath[flightPath.length-1].actions.forEach(a => { if(a.type === 'hover') totalTime += parseFloat(a.param) || 0; });
+        if (waypoints.length > 0) {
+            waypoints[waypoints.length-1].actions.forEach(a => { if(a.type === 'hover') totalTime += parseFloat(a.param) || 0; });
         }
 
         const mins = Math.floor(totalTime / 60);
         const secs = Math.round(totalTime % 60);
 
-        missionStatsCounts.innerText = `Items: ${waypoints.length} | POIs: ${pois.length}`;
+        missionStatsCounts.innerText = `Waypoints: ${waypoints.length} | POIs: ${pois.length}`;
         missionStatsFlight.innerText = `Distance: ${totalDist.toFixed(1)}m | Est. Time: ${mins}m ${secs}s`;
     }
 
@@ -334,29 +280,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         floatingItemPanel.style.display = 'block';
 
         const isBulk = selectedWpIds.length > 1;
-        const primaryWp = waypoints.find(w => w.id === selectedWpIds[0]);
-
-        let titleStr = `Waypoint ${getWpIndex(selectedWpIds[0])}`;
-        if (isBulk) titleStr = `Editing ${selectedWpIds.length} Items`;
-        else if (primaryWp && primaryWp.type === 'smooth-orbit') titleStr = `Parametric Orbit`;
-        document.getElementById('wp-editor-title').innerText = titleStr;
+        document.getElementById('wp-editor-title').innerText = isBulk ? `Editing ${selectedWpIds.length} Waypoints` : `Waypoint ${getWpIndex(selectedWpIds[0])}`;
 
         singleWpControls.style.display = isBulk ? 'none' : 'flex';
-        
-        // Hide POI targeting for smooth orbits (they target their own center)
-        document.getElementById('poi-pitch-container').style.display = (isBulk || primaryWp.type === 'smooth-orbit') ? 'none' : 'grid';
+        document.getElementById('poi-pitch-container').style.display = isBulk ? 'none' : 'grid';
 
         const navigatorPanel = document.getElementById('wp-navigator');
         if (navigatorPanel) navigatorPanel.style.display = isBulk ? 'none' : 'block';
 
+        const primaryWp = waypoints.find(w => w.id === selectedWpIds[0]);
+
         const altInput = document.getElementById('wp-edit-alt');
+        const curveInput = document.getElementById('wp-edit-curve');
         const speedInput = document.getElementById('wp-edit-speed');
         const poiSelect = document.getElementById('wp-edit-poi');
         const gimbalInput = document.getElementById('wp-edit-gimbal');
 
         altInput.value = isBulk ? '' : primaryWp.altitude;
+        curveInput.value = isBulk ? '' : primaryWp.curveRadius;
         speedInput.value = isBulk ? '' : (primaryWp.speed || '');
+        
         altInput.placeholder = isBulk ? 'Multiple' : '';
+        curveInput.placeholder = isBulk ? 'Multiple' : '';
         speedInput.placeholder = isBulk ? 'Multiple' : 'Global';
 
         let poiOptions = `<option value="none">None (Follow Course)</option>`;
@@ -366,7 +311,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         poiSelect.innerHTML = poiOptions;
 
-        if (!isBulk && primaryWp.type === 'waypoint') {
+        if (!isBulk) {
             if (primaryWp.linkedPoiId === 'none') {
                 if (primaryWp.calculatedPitch === -90) {
                     gimbalInput.value = '-90.0° (Nadir)';
@@ -421,6 +366,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         redrawScene(false); 
     });
 
+    document.getElementById('wp-edit-curve').addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        if (isNaN(val)) return;
+        selectedWpIds.forEach(id => { waypoints.find(w => w.id === id).curveRadius = val; });
+    });
+
     document.getElementById('wp-edit-speed').addEventListener('input', (e) => {
         const val = parseFloat(e.target.value);
         selectedWpIds.forEach(id => { waypoints.find(w => w.id === id).speed = isNaN(val) ? null : val; });
@@ -429,10 +380,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('wp-edit-poi').addEventListener('change', (e) => {
         const val = e.target.value;
-        selectedWpIds.forEach(id => { 
-            const w = waypoints.find(w => w.id === id);
-            if(w.type === 'waypoint') w.linkedPoiId = val; 
-        });
+        selectedWpIds.forEach(id => { waypoints.find(w => w.id === id).linkedPoiId = val; });
         redrawScene(false);
     });
 
@@ -535,7 +483,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const lastAction = actionStack.pop();
         if (!lastAction) return;
 
-        if (lastAction.type === 'waypoint' || lastAction.type === 'smooth-orbit') {
+        if (lastAction.type === 'waypoint') {
             waypoints = waypoints.filter(wp => wp.id !== lastAction.id);
             selectedWpIds = selectedWpIds.filter(id => id !== lastAction.id);
         } else if (lastAction.type === 'poi') {
@@ -608,20 +556,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             clearPreviews();
             previewEntities.push(viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(orbitCenterLatLng.lng, orbitCenterLatLng.lat),
-                ellipse: { semiMinorAxis: currentOrbitRadius, semiMajorAxis: currentOrbitRadius, material: Cesium.Color.ORANGE.withAlpha(0.2), outline: true, outlineColor: Cesium.Color.ORANGE }
+                ellipse: { semiMinorAxis: currentOrbitRadius, semiMajorAxis: currentOrbitRadius, material: Cesium.Color.PURPLE.withAlpha(0.2), outline: true, outlineColor: Cesium.Color.PURPLE }
             }));
         } 
-        else if (currentMode === 'smooth-orbit' && smoothOrbitStep === 1 && smoothOrbitCenterLatLng) {
-            let distance = getDistance(smoothOrbitCenterLatLng.lat, smoothOrbitCenterLatLng.lng, coords.lat, coords.lng);
-            let smoothRad = Math.max(5, distance);
-            smoothRadiusInputEl.value = Math.round(smoothRad);
-            
-            clearPreviews();
-            previewEntities.push(viewer.entities.add({
-                position: Cesium.Cartesian3.fromDegrees(smoothOrbitCenterLatLng.lng, smoothOrbitCenterLatLng.lat),
-                ellipse: { semiMinorAxis: smoothRad, semiMajorAxis: smoothRad, material: Cesium.Color.PURPLE.withAlpha(0.2), outline: true, outlineColor: Cesium.Color.PURPLE }
-            }));
-        }
         else if (currentMode === 'grid' && gridStep === 1 && gridCenterLatLng) {
             const latDiff = Math.abs(coords.lat - gridCenterLatLng.lat);
             const lngDiff = Math.abs(coords.lng - gridCenterLatLng.lng);
@@ -665,7 +602,6 @@ handler.setInputAction(function(click) {
 
         if (picked && picked.id && picked.id.isInteractive) {
             if (currentMode === 'orbit' && orbitStep === 1) return;
-            if (currentMode === 'smooth-orbit' && smoothOrbitStep === 1) return;
             if (currentMode === 'grid' && gridStep === 1) return;
 
             const itemId = picked.id.itemId;
@@ -688,6 +624,7 @@ handler.setInputAction(function(click) {
                         selectedWpIds = [itemId];
                     }
                 }
+                // FIXED: Removed tab switching logic, just redraw
                 redrawScene(false);
             } else if (itemType === 'poi') {
                 relocatingItem = { type: 'poi', id: itemId };
@@ -714,14 +651,6 @@ handler.setInputAction(function(click) {
                 generateOrbit(orbitCenterLatLng.lat, orbitCenterLatLng.lng);
                 orbitCenterLatLng = null;
             }
-        } else if (currentMode === 'smooth-orbit') {
-            if (smoothOrbitStep === 0) {
-                smoothOrbitStep = 1; smoothOrbitCenterLatLng = coords;
-            } else if (smoothOrbitStep === 1) {
-                smoothOrbitStep = 0; clearPreviews();
-                generateSmoothOrbit(smoothOrbitCenterLatLng.lat, smoothOrbitCenterLatLng.lng);
-                smoothOrbitCenterLatLng = null;
-            }
         } else if (currentMode === 'grid') {
             if (gridStep === 0) {
                 gridStep = 1; gridCenterLatLng = coords;
@@ -734,13 +663,13 @@ handler.setInputAction(function(click) {
             const wp = addWaypoint(coords.lat, coords.lng);
             selectedWpIds = [wp.id]; 
             actionStack.push({ type: 'waypoint', id: wp.id });
+            // FIXED: Removed tab switching logic, just redraw
             redrawScene(true);
         } else if (currentMode === 'poi') {
             const p = addPOI(coords.lat, coords.lng);
             actionStack.push({ type: 'poi', id: p.id });
         }
     }, Cesium.ScreenSpaceEventType.LEFT_UP);
-    
     // ========================================================
     // LOGIC & DATA GENERATION
     // ========================================================
@@ -748,7 +677,7 @@ handler.setInputAction(function(click) {
         let initialActions = [];
         if (hasPhoto) { initialActions = [{ type: 'hover', param: 2 }, { type: 'photo', param: 0 }]; }
         const waypoint = { 
-            id: Date.now() + Math.random(), type: 'waypoint', lat: lat, lng: lng, altitude: altitude, speed: null,
+            id: Date.now() + Math.random(), lat: lat, lng: lng, altitude: altitude, speed: null,
             curveRadius: 0, linkedPoiId: linkedPoiId, calculatedPitch: 0, actions: initialActions,
             _groundHeight: 0 
         };
@@ -783,28 +712,6 @@ handler.setInputAction(function(click) {
             generatedWpIds.push(wp.id);
         }
         actionStack.push({ type: 'orbit', poiId: centerPoi.id, wpIds: generatedWpIds });
-        setMode('select');
-        redrawScene(true);
-    }
-
-    function generateSmoothOrbit(centerLat, centerLng) {
-        const radiusMeters = parseFloat(smoothRadiusInputEl.value);
-        const altitude = parseFloat(document.getElementById('smooth-orbit-alt').value);
-        const speed = parseFloat(document.getElementById('smooth-orbit-speed').value);
-        
-        const orbitObj = {
-            id: Date.now() + Math.random(),
-            type: 'smooth-orbit',
-            lat: centerLat, 
-            lng: centerLng,
-            radius: radiusMeters,
-            altitude: altitude,
-            speed: speed,
-            actions: [], 
-            _groundHeight: 0
-        };
-        waypoints.push(orbitObj);
-        actionStack.push({ type: 'smooth-orbit', id: orbitObj.id });
         setMode('select');
         redrawScene(true);
     }
@@ -852,9 +759,7 @@ handler.setInputAction(function(click) {
 
         if (sampleTerrain) {
             const cartographics = [];
-            waypoints.forEach(wp => {
-                cartographics.push(Cesium.Cartographic.fromDegrees(wp.lng, wp.lat));
-            });
+            waypoints.forEach(wp => cartographics.push(Cesium.Cartographic.fromDegrees(wp.lng, wp.lat)));
             pois.forEach(poi => cartographics.push(Cesium.Cartographic.fromDegrees(poi.lng, poi.lat)));
 
             let tp = viewer.terrainProvider || viewer.scene.terrainProvider;
@@ -873,12 +778,9 @@ handler.setInputAction(function(click) {
 
         viewer.entities.removeAll();
 
-        // Expand virtual waypoints just for polyline rendering
-        const displayPath = expandMission();
-
-        if (displayPath.length > 1) {
+        if (waypoints.length > 1) {
             const positions = [];
-            displayPath.forEach(wp => {
+            waypoints.forEach(wp => {
                 const absoluteZ = wp.altitude + (wp._groundHeight || 0);
                 positions.push(Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, absoluteZ));
             });
@@ -907,9 +809,8 @@ handler.setInputAction(function(click) {
 
         waypoints.forEach((wp, index) => {
             const isSelected = selectedWpIds.includes(wp.id);
-            const isSmoothOrbit = wp.type === 'smooth-orbit';
             
-            let color = isSmoothOrbit ? Cesium.Color.PURPLE : Cesium.Color.DODGERBLUE;
+            let color = Cesium.Color.DODGERBLUE;
             if (relocatingItem && relocatingItem.type === 'wp' && relocatingItem.id === wp.id) {
                 color = Cesium.Color.LIMEGREEN;
             } else if (isSelected) {
@@ -918,60 +819,48 @@ handler.setInputAction(function(click) {
 
             const wpAbsoluteZ = wp.altitude + (wp._groundHeight || 0);
             
-            if (isSmoothOrbit) {
-                // Draw center point and radius polygon
-                const ent = viewer.entities.add({
-                    position: Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, wpAbsoluteZ),
-                    point: { pixelSize: isSelected ? 16 : 12, color: color, outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
-                    label: { text: `Orbit ${index+1}`, font: 'bold 12pt sans-serif', fillColor: color, style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth: 2, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -15) },
-                    ellipse: { semiMinorAxis: wp.radius, semiMajorAxis: wp.radius, height: wpAbsoluteZ, material: color.withAlpha(0.1), outline: true, outlineColor: color }
-                });
-                ent.isInteractive = true;
-                ent.itemType = 'wp';
-                ent.itemId = wp.id;
-            } else {
-                // Normal Waypoint Render
-                const ent = viewer.entities.add({
-                    position: Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, wpAbsoluteZ),
-                    point: { pixelSize: isSelected ? 16 : 12, color: color, outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
-                    label: { text: `WP ${index+1}`, font: 'bold 12pt sans-serif', fillColor: color, style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth: 2, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -15) }
-                });
-                ent.isInteractive = true;
-                ent.itemType = 'wp';
-                ent.itemId = wp.id;
+            const ent = viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, wpAbsoluteZ),
+                point: { pixelSize: isSelected ? 16 : 12, color: color, outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
+                label: { text: `WP ${index+1}`, font: 'bold 12pt sans-serif', fillColor: color, style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth: 2, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -15) }
+            });
+            ent.isInteractive = true;
+            ent.itemType = 'wp';
+            ent.itemId = wp.id;
 
-                viewer.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArrayHeights([wp.lng, wp.lat, wp._groundHeight || 0, wp.lng, wp.lat, wpAbsoluteZ]), width: 2, material: color.withAlpha(0.5) } });
+            viewer.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArrayHeights([wp.lng, wp.lat, wp._groundHeight || 0, wp.lng, wp.lat, wpAbsoluteZ]), width: 2, material: color.withAlpha(0.5) } });
 
-                if (wp.linkedPoiId !== 'none') {
-                    const targetPoi = pois.find(p => p.id === wp.linkedPoiId);
-                    if (targetPoi) {
-                        const poiAbsoluteZ = targetPoi.altitude + (targetPoi._groundHeight || 0);
-                        const distance = getDistance(wp.lat, wp.lng, targetPoi.lat, targetPoi.lng);
-                        const earthRadius = 6378137;
-                        const dLng = (targetPoi.lng - wp.lng) * Math.cos(wp.lat * Math.PI / 180);
-                        const dLat = targetPoi.lat - wp.lat;
-                        
-                        const headingRad = Math.atan2(dLng, dLat); 
-                        const halfFovRad = (75 / 2) * (Math.PI / 180);
-                        
-                        const leftLat = wp.lat + (distance * Math.cos(headingRad - halfFovRad) / earthRadius) * (180 / Math.PI);
-                        const leftLng = wp.lng + (distance * Math.sin(headingRad - halfFovRad) / earthRadius) * (180 / Math.PI) / Math.cos(wp.lat * Math.PI / 180);
-                        const rightLat = wp.lat + (distance * Math.cos(headingRad + halfFovRad) / earthRadius) * (180 / Math.PI);
-                        const rightLng = wp.lng + (distance * Math.sin(headingRad + halfFovRad) / earthRadius) * (180 / Math.PI) / Math.cos(wp.lat * Math.PI / 180);
+            if (wp.linkedPoiId !== 'none') {
+                const targetPoi = pois.find(p => p.id === wp.linkedPoiId);
+                if (targetPoi) {
+                    const poiAbsoluteZ = targetPoi.altitude + (targetPoi._groundHeight || 0);
 
-                        viewer.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArrayHeights([wp.lng, wp.lat, wpAbsoluteZ, targetPoi.lng, targetPoi.lat, poiAbsoluteZ]), width: 2, material: new Cesium.PolylineDashMaterialProperty({color: Cesium.Color.YELLOW}) } });
-                        viewer.entities.add({
-                            polygon: {
-                                hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArrayHeights([
-                                    wp.lng, wp.lat, wpAbsoluteZ,
-                                    leftLng, leftLat, poiAbsoluteZ,
-                                    rightLng, rightLat, poiAbsoluteZ
-                                ])),
-                                material: Cesium.Color.YELLOW.withAlpha(0.2),
-                                perPositionHeight: true
-                            }
-                        });
-                    }
+                    // True Geographic Math for static render
+                    const distance = getDistance(wp.lat, wp.lng, targetPoi.lat, targetPoi.lng);
+                    const earthRadius = 6378137;
+                    const dLng = (targetPoi.lng - wp.lng) * Math.cos(wp.lat * Math.PI / 180);
+                    const dLat = targetPoi.lat - wp.lat;
+                    
+                    const headingRad = Math.atan2(dLng, dLat); 
+                    const halfFovRad = (75 / 2) * (Math.PI / 180);
+                    
+                    const leftLat = wp.lat + (distance * Math.cos(headingRad - halfFovRad) / earthRadius) * (180 / Math.PI);
+                    const leftLng = wp.lng + (distance * Math.sin(headingRad - halfFovRad) / earthRadius) * (180 / Math.PI) / Math.cos(wp.lat * Math.PI / 180);
+                    const rightLat = wp.lat + (distance * Math.cos(headingRad + halfFovRad) / earthRadius) * (180 / Math.PI);
+                    const rightLng = wp.lng + (distance * Math.sin(headingRad + halfFovRad) / earthRadius) * (180 / Math.PI) / Math.cos(wp.lat * Math.PI / 180);
+
+                    viewer.entities.add({ polyline: { positions: Cesium.Cartesian3.fromDegreesArrayHeights([wp.lng, wp.lat, wpAbsoluteZ, targetPoi.lng, targetPoi.lat, poiAbsoluteZ]), width: 2, material: new Cesium.PolylineDashMaterialProperty({color: Cesium.Color.YELLOW}) } });
+                    viewer.entities.add({
+                        polygon: {
+                            hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArrayHeights([
+                                wp.lng, wp.lat, wpAbsoluteZ,
+                                leftLng, leftLat, poiAbsoluteZ,
+                                rightLng, rightLat, poiAbsoluteZ
+                            ])),
+                            material: Cesium.Color.YELLOW.withAlpha(0.2),
+                            perPositionHeight: true
+                        }
+                    });
                 }
             }
         });
@@ -1043,8 +932,7 @@ handler.setInputAction(function(click) {
     });
 
     simBtn.addEventListener('click', () => {
-        const flightPath = expandMission();
-        if (flightPath.length < 2) return;
+        if (waypoints.length < 2) return;
         
         const baseSpeed = parseFloat(globalSpeedEl.value) || 5;
         let currentTime = Cesium.JulianDate.now();
@@ -1054,30 +942,26 @@ handler.setInputAction(function(click) {
         const pitchProperty = new Cesium.SampledProperty(Number);
         const orientationProperty = new Cesium.SampledProperty(Cesium.Quaternion);
         
-        for(let i=0; i<flightPath.length; i++) {
-            const wp = flightPath[i];
+        for(let i=0; i<waypoints.length; i++) {
+            const wp = waypoints[i];
             const wpAbsZ = wp.altitude + (wp._groundHeight || 0);
             const pos = Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, wpAbsZ);
             
             let heading = 0;
-            if (wp.isVirtual) {
-                const dx = (wp.virtualPoi.lng - wp.lng) * Math.cos(wp.lat * Math.PI / 180);
-                const dy = wp.virtualPoi.lat - wp.lat;
-                heading = Math.atan2(dx, dy) - Math.PI / 2;
-            } else if (wp.linkedPoiId && wp.linkedPoiId !== 'none') {
+            if (wp.linkedPoiId !== 'none') {
                 const poi = pois.find(p => p.id === wp.linkedPoiId);
                 if (poi) {
                     const dx = (poi.lng - wp.lng) * Math.cos(wp.lat * Math.PI / 180);
                     const dy = poi.lat - wp.lat;
                     heading = Math.atan2(dx, dy) - Math.PI / 2;
                 }
-            } else if (i < flightPath.length - 1) {
-                const nextWp = flightPath[i+1];
+            } else if (i < waypoints.length - 1) {
+                const nextWp = waypoints[i+1];
                 const dx = (nextWp.lng - wp.lng) * Math.cos(wp.lat * Math.PI / 180);
                 const dy = nextWp.lat - wp.lat;
                 heading = Math.atan2(dx, dy) - Math.PI / 2;
             } else if (i > 0) {
-                const prevWp = flightPath[i-1];
+                const prevWp = waypoints[i-1];
                 const dx = (wp.lng - prevWp.lng) * Math.cos(prevWp.lat * Math.PI / 180);
                 const dy = wp.lat - prevWp.lat;
                 heading = Math.atan2(dx, dy) - Math.PI / 2;
@@ -1099,8 +983,8 @@ handler.setInputAction(function(click) {
                 orientationProperty.addSample(currentTime, quat);
             }
             
-            if (i < flightPath.length - 1) {
-                const nextWp = flightPath[i+1];
+            if (i < waypoints.length - 1) {
+                const nextWp = waypoints[i+1];
                 const nextAbsZ = nextWp.altitude + (nextWp._groundHeight || 0);
                 const nextPos = Cesium.Cartesian3.fromDegrees(nextWp.lng, nextWp.lat, nextAbsZ);
                 const dist = Cesium.Cartesian3.distance(pos, nextPos);
@@ -1185,21 +1069,17 @@ handler.setInputAction(function(click) {
     // EXPORT ENGINES
     // ========================================================
     exportDjiBtn.addEventListener('click', function() {
-        const flightPath = expandMission();
-        if (flightPath.length < 2) return;
+        if (waypoints.length < 2) return;
         let globalSpeed = parseFloat(globalSpeedEl.value) || 5;
         let finishAction = finishActionEl.value; 
         const zip = new JSZip();
         let waypointElementsXml = '';
         
-        flightPath.forEach((wp, index) => {
+        waypoints.forEach((wp, index) => {
             let headingMode = 'followWayline';
             let poiStructureXml = '';
 
-            if (wp.isVirtual) {
-                headingMode = 'towardPOI';
-                poiStructureXml = `<wpml:waypointPoiPoint><wpml:waypointPoiCoordinate>${wp.virtualPoi.lng},${wp.virtualPoi.lat}</wpml:waypointPoiCoordinate><wpml:waypointPoiAltitude>${wp.virtualPoi.altitude}</wpml:waypointPoiAltitude></wpml:waypointPoiPoint>`;
-            } else if (wp.linkedPoiId && wp.linkedPoiId !== 'none') {
+            if (wp.linkedPoiId !== 'none') {
                 const targetPoi = pois.find(p => p.id === wp.linkedPoiId);
                 if (targetPoi) {
                     headingMode = 'towardPOI';
@@ -1211,7 +1091,7 @@ handler.setInputAction(function(click) {
             let turnParamXml = `<wpml:waypointTurnParam><wpml:waypointTurnMode>${turnMode}</wpml:waypointTurnMode><wpml:waypointTurnDampingDist>${wp.curveRadius}</wpml:waypointTurnDampingDist></wpml:waypointTurnParam>`;
 
             let actionXml = `<wpml:hasAction>0</wpml:hasAction>`;
-            if (wp.actions && wp.actions.length > 0) {
+            if (wp.actions.length > 0) {
                 let innerActions = '';
                 wp.actions.forEach((act, aIdx) => {
                     let funcStr = act.type === 'photo' ? 'takePhoto' : 'hover';
@@ -1234,17 +1114,14 @@ handler.setInputAction(function(click) {
     });
 
     exportLitchiBtn.addEventListener('click', function() {
-        const flightPath = expandMission();
-        if (flightPath.length < 2) return;
+        if (waypoints.length < 2) return;
         let globalSpeed = parseFloat(globalSpeedEl.value) || 5;
         let csvContent = "latitude,longitude,altitude(m),heading(deg),curvesize(m),rotationdir,gimbalmode,gimbalpitchangle,actiontype1,actionparam1,actiontype2,actionparam2,actiontype3,actionparam3,actiontype4,actionparam4,actiontype5,actionparam5,actiontype6,actionparam6,actiontype7,actionparam7,actiontype8,actionparam8,actiontype9,actionparam9,actiontype10,actionparam10,actiontype11,actionparam11,actiontype12,actionparam12,actiontype13,actionparam13,actiontype14,actionparam14,actiontype15,actionparam15,altitudemode,speed(m/s),poi_latitude,poi_longitude,poi_altitude(m),poi_altitudemode,photo_timeinterval,photo_distinterval\n";
 
-        flightPath.forEach(wp => {
+        waypoints.forEach(wp => {
             let gimbalmode = 0, poiLat = 0, poiLng = 0, poiAlt = 0, pitchOutput = 0; 
             
-            if (wp.isVirtual) {
-                gimbalmode = 1; poiLat = wp.virtualPoi.lat; poiLng = wp.virtualPoi.lng; poiAlt = wp.virtualPoi.altitude; pitchOutput = wp.calculatedPitch || 0;
-            } else if (wp.linkedPoiId && wp.linkedPoiId !== 'none') {
+            if (wp.linkedPoiId !== 'none') {
                 const targetPoi = pois.find(p => p.id === wp.linkedPoiId);
                 if (targetPoi) { gimbalmode = 1; poiLat = targetPoi.lat; poiLng = targetPoi.lng; poiAlt = targetPoi.altitude; pitchOutput = wp.calculatedPitch || 0; }
             } else if (wp.calculatedPitch === -90) {
@@ -1253,7 +1130,7 @@ handler.setInputAction(function(click) {
 
             let litchiActions = [];
             for(let i=0; i<15; i++) {
-                if (wp.actions && i < wp.actions.length) {
+                if (i < wp.actions.length) {
                     let act = wp.actions[i];
                     if (act.type === 'photo') { litchiActions.push(1, 0); }
                     if (act.type === 'hover') { litchiActions.push(0, act.param * 1000); } 
