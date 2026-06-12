@@ -2,7 +2,7 @@
 document.addEventListener('DOMContentLoaded', async () => {
 
     // ========================================================
-    // CESIUM 3D INITIALIZATION
+    // CESIUM 3D INITIALIZATION1
     // ========================================================
     if (typeof CONFIG !== 'undefined' && CONFIG.CESIUM_ION_TOKEN) {
         Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
