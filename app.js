@@ -1,26 +1,32 @@
-// Version 41 - With Token Diagnostics
+// Version 41 - With Corrected Token Diagnostics
 document.addEventListener('DOMContentLoaded', async () => {
 
     const statusEl = document.getElementById('cesium-status');
     let isTokenValid = false;
 
     // ========================================================
-    // TOKEN DIAGNOSTIC TEST
+    // TOKEN DIAGNOSTIC TEST (Corrected for 404/Auth)
     // ========================================================
     if (typeof CONFIG !== 'undefined' && CONFIG.CESIUM_ION_TOKEN) {
         Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
         
         try {
-            // Ping the Cesium API to verify the token specifically
-            const res = await fetch(`https://api.cesium.com/v1/assets?access_token=${CONFIG.CESIUM_ION_TOKEN}`);
+            // Ping the Cesium World Terrain endpoint using the proper Authorization header
+            const res = await fetch('https://api.cesium.com/v1/assets/1/endpoint', {
+                headers: {
+                    'Authorization': `Bearer ${CONFIG.CESIUM_ION_TOKEN}`
+                }
+            });
+            
             if (res.status === 401) {
                 if (statusEl) { statusEl.innerText = 'Token Invalid ✖'; statusEl.style.background = '#e74c3c'; }
-                alert("CESIUM TOKEN ERROR: Your access token returned a 401 Unauthorized. The map will not load correctly until a valid token is placed in config.js.");
+                alert("CESIUM TOKEN ERROR: Your access token returned a 401 Unauthorized. The token has expired, been deleted, or is invalid.");
             } else if (res.ok) {
                 if (statusEl) { statusEl.innerText = 'Token Valid ✔'; statusEl.style.background = '#2ecc71'; }
                 isTokenValid = true;
             } else {
                 if (statusEl) { statusEl.innerText = `API Error: ${res.status}`; statusEl.style.background = '#e67e22'; }
+                console.warn(`Unexpected Cesium API response: ${res.status}`);
             }
         } catch (e) {
             if (statusEl) { statusEl.innerText = 'Network Error'; statusEl.style.background = '#e74c3c'; }
