@@ -1,40 +1,84 @@
 document.addEventListener('DOMContentLoaded', async () => {
+    
+    Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
 
-    // 1. Initialize Leaflet Map (2D)
-    const map = L.map('map').setView([51.8959, 0.9006], 16);
+    const viewer = new Cesium.Viewer('map', {
+        terrain: Cesium.Terrain.fromWorldTerrain(),
+        animation: false, timeline: false, infoBox: false, homeButton: false, navigationHelpButton: false,
+        baseLayerPicker: true, geocoder: true, sceneModePicker: false
+    });
 
-    // Standard OpenStreetMap (Labeled, Non-Satellite)
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors'
-    }).addTo(map);
+    // Default Start Location (Colchester)
+    const homeLocation = { lng: 0.9006, lat: 51.8959, alt: 3000 };
 
-    // Try to get user location
-    if ("geolocation" in navigator) {
-        navigator.geolocation.getCurrentPosition((position) => {
-            map.setView([position.coords.latitude, position.coords.longitude], 16);
+    viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(homeLocation.lng, homeLocation.lat, homeLocation.alt),
+        orientation: { heading: 0.0, pitch: Cesium.Math.toRadians(-45.0), roll: 0.0 }
+    });
+
+    // ========================================================
+    // MAP NAVIGATION CONTROLS (NEW)
+    // ========================================================
+    document.getElementById('nav-north-btn').addEventListener('click', () => {
+        viewer.camera.flyTo({
+            destination: viewer.camera.position,
+            orientation: { heading: 0.0, pitch: viewer.camera.pitch, roll: viewer.camera.roll },
+            duration: 1.0 
         });
-    }
+    });
 
-    // State Variables (Default to Place Waypoints)
+    document.getElementById('nav-home-btn').addEventListener('click', () => {
+        viewer.camera.flyTo({
+            destination: Cesium.Cartesian3.fromDegrees(homeLocation.lng, homeLocation.lat, homeLocation.alt),
+            orientation: { heading: 0.0, pitch: Cesium.Math.toRadians(-45.0), roll: 0.0 },
+            duration: 1.5
+        });
+    });
+
+    document.getElementById('nav-location-btn').addEventListener('click', () => {
+        if ("geolocation" in navigator) {
+            navigator.geolocation.getCurrentPosition((position) => {
+                viewer.camera.flyTo({
+                    destination: Cesium.Cartesian3.fromDegrees(position.coords.longitude, position.coords.latitude, 1500),
+                    orientation: { heading: 0.0, pitch: Cesium.Math.toRadians(-45.0), roll: 0.0 },
+                    duration: 1.5
+                });
+            }, (error) => {
+                alert("Geolocation permission denied or unavailable.");
+                console.error(error);
+            });
+        } else {
+            alert("Geolocation is not supported by your browser.");
+        }
+    });
+
+    // State Variables
     let currentMode = 'waypoint'; 
     let waypoints = [];
     let pois = [];
+    let mapEntities = []; 
     let actionStack = []; 
     let selectedWpIds = []; 
-    let orbitStep = 0, orbitCenterLatLng = null, currentOrbitRadius = 30;
+    let orbitStep = 0, orbitCenterCartesian = null, orbitPreviewEntity = null, currentOrbitRadius = 30;
+    let draggedItem = null, wasDragged = false;
+    let isShiftDown = false;
+    let simDroneEntity = null; 
 
-    // Map Layers (to clear and redraw)
-    let mapLayers = L.layerGroup().addTo(map);
-    let orbitPreviewLayer = L.layerGroup().addTo(map);
+    // Shift Key Tracker
+    document.addEventListener('keydown', e => { if (e.key === 'Shift') isShiftDown = true; });
+    document.addEventListener('keyup', e => { if (e.key === 'Shift') isShiftDown = false; });
 
     // DOM Bindings
     const undoBtn = document.getElementById('undo-btn');
     const clearBtn = document.getElementById('clear-btn');
     const exportDjiBtn = document.getElementById('export-dji-btn');
     const exportLitchiBtn = document.getElementById('export-litchi-btn');
+    const playSimBtn = document.getElementById('play-sim-btn'); 
+    const stopSimBtn = document.getElementById('stop-sim-btn'); 
     const modeSelectEl = document.getElementById('mode-select');
     const orbitSettingsPanel = document.getElementById('orbit-settings');
     const radiusInputEl = document.getElementById('orbit-radius');
+    const zoomSlider = document.getElementById('zoom-slider');
     const globalSpeedEl = document.getElementById('global-speed');
 
     // UI Panels
@@ -49,22 +93,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     function setMode(mode) {
         currentMode = mode;
         orbitSettingsPanel.style.display = (mode === 'orbit') ? 'block' : 'none';
-        
-        // Color coding for mode clarity
-        if (mode === 'select') modeSelectEl.style.backgroundColor = '#34495e'; // Dark slate for select
-        else if (mode === 'waypoint') modeSelectEl.style.backgroundColor = '#007bff';
-        else if (mode === 'poi') modeSelectEl.style.backgroundColor = '#e67e22';
-        else if (mode === 'orbit') modeSelectEl.style.backgroundColor = '#9b59b6';
 
-        if (orbitStep === 1) { 
-            orbitStep = 0; 
-            orbitCenterLatLng = null; 
-            orbitPreviewLayer.clearLayers(); 
+        if (mode === 'waypoint') modeSelectEl.style.backgroundColor = '#007bff';
+        if (mode === 'poi') modeSelectEl.style.backgroundColor = '#e67e22';
+        if (mode === 'orbit') modeSelectEl.style.backgroundColor = '#9b59b6';
+
+        if (orbitStep === 1) {
+            orbitStep = 0;
+            orbitCenterCartesian = null;
+            viewer.scene.screenSpaceCameraController.enableInputs = true;
+            if (orbitPreviewEntity) {
+                viewer.entities.remove(orbitPreviewEntity);
+                orbitPreviewEntity = null;
+            }
         }
     }
-    
-    // Set initial color
-    setMode('waypoint');
     modeSelectEl.addEventListener('change', (e) => setMode(e.target.value));
     globalSpeedEl.addEventListener('input', () => updateSidebarUI());
 
@@ -74,9 +117,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     function updateHUD() {
         let totalDist = 0;
         for (let i = 0; i < waypoints.length - 1; i++) {
-            const p1 = L.latLng(waypoints[i].lat, waypoints[i].lng);
-            const p2 = L.latLng(waypoints[i+1].lat, waypoints[i+1].lng);
-            totalDist += p1.distanceTo(p2);
+            const p1 = Cesium.Cartesian3.fromDegrees(waypoints[i].lng, waypoints[i].lat, waypoints[i].terrainHeight + waypoints[i].altitude);
+            const p2 = Cesium.Cartesian3.fromDegrees(waypoints[i+1].lng, waypoints[i+1].lat, waypoints[i+1].terrainHeight + waypoints[i+1].altitude);
+            totalDist += Cesium.Cartesian3.distance(p1, p2);
         }
         
         const speed = parseFloat(globalSpeedEl.value) || 5;
@@ -127,7 +170,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         poiSelect.innerHTML = poiOptions;
 
-        // Auto-Calculate Gimbal Pitch (Flat 2D Math)
+        // Auto-Calculate Gimbal Pitch
         if (!isBulk) {
             if (primaryWp.linkedPoiId === 'none') {
                 gimbalInput.value = 'N/A';
@@ -135,9 +178,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else {
                 const targetPoi = pois.find(p => p.id === primaryWp.linkedPoiId);
                 if (targetPoi) {
-                    const horizDist = L.latLng(primaryWp.lat, primaryWp.lng).distanceTo(L.latLng(targetPoi.lat, targetPoi.lng));
-                    const altDiff = targetPoi.altitude - primaryWp.altitude; // Simplified for 2D flat earth
-                    const pitchDeg = (Math.atan2(altDiff, horizDist) * 180) / Math.PI;
+                    const wpGround = Cesium.Cartesian3.fromDegrees(primaryWp.lng, primaryWp.lat, 0);
+                    const poiGround = Cesium.Cartesian3.fromDegrees(targetPoi.lng, targetPoi.lat, 0);
+                    const horizDist = Cesium.Cartesian3.distance(wpGround, poiGround);
+                    const altDiff = (targetPoi.terrainHeight + targetPoi.altitude) - (primaryWp.terrainHeight + primaryWp.altitude);
+                    const pitchDeg = Cesium.Math.toDegrees(Math.atan2(altDiff, horizDist));
                     
                     gimbalInput.value = `${pitchDeg.toFixed(1)}°`;
                     primaryWp.calculatedPitch = pitchDeg; 
@@ -252,10 +297,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         redrawMap();
     }
 
-    document.getElementById('wp-move-top').addEventListener('click', () => { if (selectedWpIds.length !== 1) return; moveWaypointToEdge(waypoints.findIndex(w => w.id === selectedWpIds[0]), true); });
-    document.getElementById('wp-move-up').addEventListener('click', () => { if (selectedWpIds.length !== 1) return; moveWaypoint(waypoints.findIndex(w => w.id === selectedWpIds[0]), -1); });
-    document.getElementById('wp-move-down').addEventListener('click', () => { if (selectedWpIds.length !== 1) return; moveWaypoint(waypoints.findIndex(w => w.id === selectedWpIds[0]), 1); });
-    document.getElementById('wp-move-bottom').addEventListener('click', () => { if (selectedWpIds.length !== 1) return; moveWaypointToEdge(waypoints.findIndex(w => w.id === selectedWpIds[0]), false); });
+    document.getElementById('wp-move-top').addEventListener('click', () => {
+        if (selectedWpIds.length !== 1) return;
+        moveWaypointToEdge(waypoints.findIndex(w => w.id === selectedWpIds[0]), true);
+    });
+    document.getElementById('wp-move-up').addEventListener('click', () => {
+        if (selectedWpIds.length !== 1) return;
+        moveWaypoint(waypoints.findIndex(w => w.id === selectedWpIds[0]), -1);
+    });
+    document.getElementById('wp-move-down').addEventListener('click', () => {
+        if (selectedWpIds.length !== 1) return;
+        moveWaypoint(waypoints.findIndex(w => w.id === selectedWpIds[0]), 1);
+    });
+    document.getElementById('wp-move-bottom').addEventListener('click', () => {
+        if (selectedWpIds.length !== 1) return;
+        moveWaypointToEdge(waypoints.findIndex(w => w.id === selectedWpIds[0]), false);
+    });
 
     document.getElementById('wp-delete').addEventListener('click', () => {
         if (selectedWpIds.length !== 1) return;
@@ -265,18 +322,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // ========================================================
-    // NAVIGATOR BUTTONS & UNDO
+    // NAVIGATOR BUTTONS
     // ========================================================
     document.getElementById('nav-prev').addEventListener('click', () => {
         if (selectedWpIds.length !== 1) return;
         let idx = waypoints.findIndex(w => w.id === selectedWpIds[0]);
-        if (idx > 0) { selectedWpIds = [waypoints[idx - 1].id]; redrawMap(); }
+        if (idx > 0) {
+            selectedWpIds = [waypoints[idx - 1].id];
+            redrawMap();
+        }
     });
 
     document.getElementById('nav-next').addEventListener('click', () => {
         if (selectedWpIds.length !== 1) return;
         let idx = waypoints.findIndex(w => w.id === selectedWpIds[0]);
-        if (idx < waypoints.length - 1) { selectedWpIds = [waypoints[idx + 1].id]; redrawMap(); }
+        if (idx < waypoints.length - 1) {
+            selectedWpIds = [waypoints[idx + 1].id];
+            redrawMap();
+        }
+    });
+
+    // ========================================================
+    // ZOOM SLIDER & UNDO/CLEAR
+    // ========================================================
+    zoomSlider.addEventListener('input', (e) => {
+        const targetHeight = parseInt(e.target.value);
+        const currentCarto = Cesium.Cartographic.fromCartesian(viewer.camera.position);
+        viewer.camera.setView({
+            destination: Cesium.Cartesian3.fromRadians(currentCarto.longitude, currentCarto.latitude, targetHeight),
+            orientation: { heading: viewer.camera.heading, pitch: viewer.camera.pitch, roll: viewer.camera.roll }
+        });
+    });
+
+    viewer.camera.changed.addEventListener(() => {
+        const currentHeight = Cesium.Cartographic.fromCartesian(viewer.camera.position).height;
+        zoomSlider.value = Math.max(10, Math.min(20000, currentHeight));
     });
 
     undoBtn.addEventListener('click', () => {
@@ -297,102 +377,156 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     clearBtn.addEventListener('click', function() {
+        stopSimulation(); 
         waypoints = []; pois = []; actionStack = []; selectedWpIds = [];
         redrawMap();
     });
 
     // ========================================================
-    // 2D LEAFLET MAP INTERACTION (Clicks, Drags, Selection)
+    // MAP INTERACTION (Clicks, Drags, Selection via Cesium Modifiers)
     // ========================================================
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
-    map.on('mousemove', function(e) {
-        if (currentMode === 'orbit' && orbitStep === 1 && orbitCenterLatLng) {
-            let distance = orbitCenterLatLng.distanceTo(e.latlng);
-            currentOrbitRadius = Math.max(5, distance);
-            radiusInputEl.value = Math.round(currentOrbitRadius);
+    function handleMapClick(click, isShift) {
+        if (currentMode === 'orbit' && orbitStep === 1) return; 
+
+        const pickedObject = viewer.scene.pick(click.position);
+        
+        if (Cesium.defined(pickedObject) && pickedObject.id && pickedObject.id.customData) {
+            draggedItem = pickedObject.id.customData; 
+            wasDragged = false;
+            viewer.scene.screenSpaceCameraController.enableInputs = false; 
             
-            orbitPreviewLayer.clearLayers();
-            L.circle(orbitCenterLatLng, {radius: currentOrbitRadius, color: 'purple', weight: 2, fillOpacity: 0.2}).addTo(orbitPreviewLayer);
+            if (draggedItem.type === 'wp') {
+                if (isShift) {
+                    if (selectedWpIds.includes(draggedItem.item.id)) {
+                        selectedWpIds = selectedWpIds.filter(id => id !== draggedItem.item.id);
+                    } else {
+                        selectedWpIds.push(draggedItem.item.id);
+                    }
+                } else {
+                    selectedWpIds = [draggedItem.item.id];
+                }
+                redrawMap();
+            }
+        } else {
+            if (currentMode !== 'waypoint') {
+                selectedWpIds = [];
+                redrawMap();
+            }
         }
-    });
+    }
 
-    map.on('click', function(e) {
-        // Stop completely if in Select Mode
-        if (currentMode === 'select') return;
+    handler.setInputAction(function(click) { handleMapClick(click, false); }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+    handler.setInputAction(function(click) { handleMapClick(click, true); }, Cesium.ScreenSpaceEventType.LEFT_DOWN, Cesium.KeyboardEventModifier.SHIFT);
 
-        const lat = e.latlng.lat;
-        const lng = e.latlng.lng;
+    handler.setInputAction(function (movement) {
+        if (currentMode === 'orbit' && orbitStep === 1 && orbitCenterCartesian) {
+            const ray = viewer.camera.getPickRay(movement.endPosition);
+            const position = viewer.scene.globe.pick(ray, viewer.scene);
+            if (Cesium.defined(position)) {
+                let distance = Cesium.Cartesian3.distance(orbitCenterCartesian, position);
+                radiusInputEl.value = Math.round(Math.max(5, distance));
+            }
+        }
+
+        if (draggedItem) {
+            wasDragged = true;
+            const ray = viewer.camera.getPickRay(movement.endPosition);
+            const position = viewer.scene.globe.pick(ray, viewer.scene);
+            if (position) {
+                const carto = Cesium.Cartographic.fromCartesian(position);
+                draggedItem.item.lat = Cesium.Math.toDegrees(carto.latitude);
+                draggedItem.item.lng = Cesium.Math.toDegrees(carto.longitude);
+                draggedItem.item.terrainHeight = carto.height || 0;
+                redrawMap(); 
+            }
+        }
+    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+    handler.setInputAction(function (click) {
+        if (draggedItem) {
+            draggedItem = null;
+            viewer.scene.screenSpaceCameraController.enableInputs = true;
+            setTimeout(() => { wasDragged = false; }, 50);
+        }
+    }, Cesium.ScreenSpaceEventType.LEFT_UP);
+
+    handler.setInputAction(function (click) {
+        if (wasDragged) return; 
+
+        const ray = viewer.camera.getPickRay(click.position);
+        const position = viewer.scene.globe.pick(ray, viewer.scene);
+        if (!Cesium.defined(position)) return;
+
+        const cartographic = Cesium.Cartographic.fromCartesian(position);
+        const lng = Cesium.Math.toDegrees(cartographic.longitude);
+        const lat = Cesium.Math.toDegrees(cartographic.latitude);
+        const terrainHeight = cartographic.height || 0; 
 
         if (currentMode === 'orbit') {
             if (orbitStep === 0) {
                 orbitStep = 1;
-                orbitCenterLatLng = e.latlng;
+                orbitCenterCartesian = position;
+                viewer.scene.screenSpaceCameraController.enableInputs = false;
+                orbitPreviewEntity = viewer.entities.add({
+                    position: orbitCenterCartesian,
+                    ellipse: {
+                        semiMinorAxis: new Cesium.CallbackProperty(() => parseFloat(radiusInputEl.value), false),
+                        semiMajorAxis: new Cesium.CallbackProperty(() => parseFloat(radiusInputEl.value), false),
+                        material: Cesium.Color.PURPLE.withAlpha(0.3), outline: true, outlineColor: Cesium.Color.PURPLE
+                    }
+                });
             } else if (orbitStep === 1) {
                 orbitStep = 0;
-                orbitPreviewLayer.clearLayers();
-                generateOrbit(orbitCenterLatLng.lat, orbitCenterLatLng.lng);
-                orbitCenterLatLng = null;
+                viewer.scene.screenSpaceCameraController.enableInputs = true;
+                if (orbitPreviewEntity) { viewer.entities.remove(orbitPreviewEntity); orbitPreviewEntity = null; }
+                const centerCarto = Cesium.Cartographic.fromCartesian(orbitCenterCartesian);
+                generateOrbit(Cesium.Math.toDegrees(centerCarto.latitude), Cesium.Math.toDegrees(centerCarto.longitude), centerCarto.height || 0);
+                orbitCenterCartesian = null;
             }
         } else if (currentMode === 'waypoint') {
-            const wp = addWaypoint(lat, lng);
-            selectedWpIds = [wp.id]; 
-            actionStack.push({ type: 'waypoint', id: wp.id });
-            redrawMap();
+            const pickedObject = viewer.scene.pick(click.position);
+            if (!Cesium.defined(pickedObject) || !pickedObject.id || !pickedObject.id.customData) {
+                const wp = addWaypoint(lat, lng, terrainHeight);
+                selectedWpIds = [wp.id]; 
+                actionStack.push({ type: 'waypoint', id: wp.id });
+                redrawMap();
+            }
         } else if (currentMode === 'poi') {
-            const p = addPOI(lat, lng);
+            const p = addPOI(lat, lng, terrainHeight);
             actionStack.push({ type: 'poi', id: p.id });
         }
-    });
-
-    // Reusable click handler for markers
-    function handleMarkerClick(e, itemType, itemId) {
-        L.DomEvent.stopPropagation(e); // Prevent map click from firing
-        if (currentMode === 'orbit' && orbitStep === 1) return;
-
-        if (itemType === 'wp') {
-            if (e.originalEvent.shiftKey) {
-                if (selectedWpIds.includes(itemId)) {
-                    selectedWpIds = selectedWpIds.filter(id => id !== itemId);
-                } else {
-                    selectedWpIds.push(itemId);
-                }
-            } else {
-                selectedWpIds = [itemId];
-            }
-            redrawMap();
-        } else {
-            selectedWpIds = [];
-            redrawMap();
-        }
-    }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
     // ========================================================
     // LOGIC & DATA GENERATION
     // ========================================================
-    function addWaypoint(lat, lng, altitude = 50, linkedPoiId = 'none', hasPhoto = false) {
+    function addWaypoint(lat, lng, terrainHeight, altitude = 50, linkedPoiId = 'none', hasPhoto = false) {
         const waypoint = {
             id: Date.now() + Math.random(),
-            lat: lat, lng: lng, altitude: altitude, curveRadius: 0, linkedPoiId: linkedPoiId, calculatedPitch: 0,
+            lat: lat, lng: lng, terrainHeight: terrainHeight, altitude: altitude, curveRadius: 0, linkedPoiId: linkedPoiId,
+            calculatedPitch: 0,
             actions: hasPhoto ? [{type: 'photo', param: 0}] : [] 
         };
         waypoints.push(waypoint);
         return waypoint;
     }
 
-    function addPOI(lat, lng) {
+    function addPOI(lat, lng, terrainHeight) {
         const poiIndex = pois.length + 1;
-        const poi = { id: 'poi_' + Date.now() + Math.random(), name: `POI ${poiIndex}`, lat: lat, lng: lng, altitude: 15 };
+        const poi = { id: 'poi_' + Date.now() + Math.random(), name: `POI ${poiIndex}`, lat: lat, lng: lng, terrainHeight: terrainHeight, altitude: 15 };
         pois.push(poi);
         redrawMap();
         return poi;
     }
 
-    function generateOrbit(centerLat, centerLng) {
+    function generateOrbit(centerLat, centerLng, centerTerrainHeight) {
         const radiusMeters = parseFloat(radiusInputEl.value);
         const altitude = parseFloat(document.getElementById('orbit-alt').value);
         const photoCount = parseInt(document.getElementById('orbit-count').value);
 
-        const centerPoi = addPOI(centerLat, centerLng);
+        const centerPoi = addPOI(centerLat, centerLng, centerTerrainHeight);
         const earthRadius = 6378137; 
         const generatedWpIds = [];
         
@@ -400,85 +534,184 @@ document.addEventListener('DOMContentLoaded', async () => {
             const angleRad = ((360 / photoCount) * i) * (Math.PI / 180);
             const wpLat = centerLat + ((radiusMeters * Math.cos(angleRad)) / earthRadius) * (180 / Math.PI);
             const wpLng = centerLng + ((radiusMeters * Math.sin(angleRad)) / earthRadius) * (180 / Math.PI) / Math.cos(centerLat * Math.PI / 180);
-            const wp = addWaypoint(wpLat, wpLng, altitude, centerPoi.id, true);
+            const wp = addWaypoint(wpLat, wpLng, centerTerrainHeight, altitude, centerPoi.id, true);
             generatedWpIds.push(wp.id);
         }
         
         actionStack.push({ type: 'orbit', poiId: centerPoi.id, wpIds: generatedWpIds });
-        setMode('select'); // Switch to select mode automatically after generation
-        modeSelectEl.value = 'select';
+        setMode('waypoint');
+        modeSelectEl.value = 'waypoint';
         redrawMap();
     }
 
     // ========================================================
-    // 2D LEAFLET RENDER ENGINE
+    // CESIUM RENDER ENGINE
     // ========================================================
     function redrawMap() {
-        mapLayers.clearLayers();
+        mapEntities.forEach(entity => viewer.entities.remove(entity));
+        mapEntities = [];
 
-        // 1. Draw Flight Path
-        if (waypoints.length > 1) {
-            const latlngs = waypoints.map(wp => [wp.lat, wp.lng]);
-            L.polyline(latlngs, {color: '#3498db', weight: 4, dashArray: '5, 10'}).addTo(mapLayers);
-        }
+        waypoints.forEach((wp, index) => {
+            const absoluteHeight = wp.terrainHeight + wp.altitude;
+            const isSelected = selectedWpIds.includes(wp.id);
+            
+            const pointColor = isSelected ? Cesium.Color.YELLOW : Cesium.Color.DODGERBLUE;
+            const labelScale = isSelected ? 1.2 : 1.0;
 
-        // 2. Draw Sightlines to POIs
-        waypoints.forEach(wp => {
+            const entity = viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, absoluteHeight),
+                point: { 
+                    pixelSize: isSelected ? 16 : 14, 
+                    color: pointColor, 
+                    outlineColor: Cesium.Color.WHITE, 
+                    outlineWidth: 2,
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY 
+                },
+                label: {
+                    text: `WP ${index + 1}\n(${wp.altitude}m)`,
+                    font: '14pt sans-serif',
+                    scale: labelScale,
+                    fillColor: isSelected ? Cesium.Color.YELLOW : Cesium.Color.WHITE,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                    outlineWidth: 2,
+                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                    pixelOffset: new Cesium.Cartesian2(0, -10),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY 
+                }
+            });
+            entity.customData = { type: 'wp', item: wp };
+            mapEntities.push(entity);
+
+            const stem = viewer.entities.add({
+                polyline: {
+                    positions: [ Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, wp.terrainHeight), Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, absoluteHeight) ],
+                    width: isSelected ? 2.5 : 1.5,
+                    material: new Cesium.PolylineDashMaterialProperty({ color: isSelected ? Cesium.Color.YELLOW.withAlpha(0.8) : Cesium.Color.WHITE.withAlpha(0.8) }),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                }
+            });
+            mapEntities.push(stem);
+
             if (wp.linkedPoiId !== 'none') {
                 const targetPoi = pois.find(p => p.id === wp.linkedPoiId);
                 if (targetPoi) {
-                    L.polyline([[wp.lat, wp.lng], [targetPoi.lat, targetPoi.lng]], {color: '#f1c40f', weight: 2, dashArray: '4, 4'}).addTo(mapLayers);
+                    const sightline = viewer.entities.add({
+                        polyline: {
+                            positions: [ Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, absoluteHeight), Cesium.Cartesian3.fromDegrees(targetPoi.lng, targetPoi.lat, targetPoi.terrainHeight + targetPoi.altitude) ],
+                            width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.YELLOW.withAlpha(0.8) }), disableDepthTestDistance: Number.POSITIVE_INFINITY
+                        }
+                    });
+                    mapEntities.push(sightline);
                 }
             }
         });
 
-        // 3. Draw POIs
         pois.forEach((poi, index) => {
-            const iconHtml = `<div class="custom-leaflet-label poi">${poi.name}<br>(${poi.altitude}m)</div>`;
-            const icon = L.divIcon({ className: 'custom-icon', html: iconHtml, iconSize: [80, 40], iconAnchor: [40, 40] });
-            
-            const marker = L.marker([poi.lat, poi.lng], { icon: icon, draggable: true }).addTo(mapLayers);
-            
-            // Add a dedicated click listener to the visual dot as well as the label
-            const dot = L.circleMarker([poi.lat, poi.lng], { radius: 8, fillColor: '#e67e22', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(mapLayers);
-            dot.on('click', (e) => handleMarkerClick(e, 'poi', poi.id));
-
-            marker.on('dragend', function(e) {
-                poi.lat = e.target.getLatLng().lat;
-                poi.lng = e.target.getLatLng().lng;
-                redrawMap();
+            const absoluteHeight = poi.terrainHeight + poi.altitude;
+            const entity = viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, absoluteHeight),
+                point: { pixelSize: 14, color: Cesium.Color.ORANGE, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                label: { text: `${poi.name}\n(${poi.altitude}m)`, font: '12pt sans-serif', style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth: 2, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -10), disableDepthTestDistance: Number.POSITIVE_INFINITY }
             });
-            marker.on('click', (e) => handleMarkerClick(e, 'poi', poi.id));
+            entity.customData = { type: 'poi', item: poi };
+            mapEntities.push(entity);
+            mapEntities.push(viewer.entities.add({
+                polyline: { positions: [ Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, poi.terrainHeight), Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, absoluteHeight) ], width: 1.5, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.ORANGE.withAlpha(0.6) }), disableDepthTestDistance: Number.POSITIVE_INFINITY }
+            }));
         });
 
-        // 4. Draw Waypoints
-        waypoints.forEach((wp, index) => {
-            const isSelected = selectedWpIds.includes(wp.id);
-            const color = isSelected ? '#f1c40f' : '#3498db';
-            const labelClass = isSelected ? 'custom-leaflet-label selected' : 'custom-leaflet-label';
-            
-            const iconHtml = `<div class="${labelClass}">WP ${index + 1}<br>(${wp.altitude}m)</div>`;
-            const icon = L.divIcon({ className: 'custom-icon', html: iconHtml, iconSize: [80, 40], iconAnchor: [40, 40] });
-            
-            const marker = L.marker([wp.lat, wp.lng], { icon: icon, draggable: true }).addTo(mapLayers);
-            
-            // Add a dedicated click listener to the visual dot
-            const dot = L.circleMarker([wp.lat, wp.lng], { radius: isSelected ? 10 : 8, fillColor: color, color: '#fff', weight: 2, fillOpacity: 1 }).addTo(mapLayers);
-            dot.on('click', (e) => handleMarkerClick(e, 'wp', wp.id));
-
-            marker.on('dragend', function(e) {
-                wp.lat = e.target.getLatLng().lat;
-                wp.lng = e.target.getLatLng().lng;
-                redrawMap();
-            });
-            marker.on('click', (e) => handleMarkerClick(e, 'wp', wp.id));
-        });
+        if (waypoints.length > 1) {
+            const linePositions = waypoints.map(wp => Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, wp.terrainHeight + wp.altitude));
+            mapEntities.push(viewer.entities.add({
+                polyline: { positions: linePositions, width: 4, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.DODGERBLUE }), depthFailMaterial: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.DODGERBLUE.withAlpha(0.3) }) }
+            }));
+        }
 
         const canExport = waypoints.length > 1;
         exportDjiBtn.disabled = !canExport;
         exportLitchiBtn.disabled = !canExport;
         
+        playSimBtn.disabled = !canExport;
+        stopSimBtn.disabled = !canExport;
+        
         updateSidebarUI();
+    }
+
+    // ========================================================
+    // 3D FLIGHT SIMULATION ENGINE (SCALED)
+    // ========================================================
+    playSimBtn.addEventListener('click', () => {
+        if (waypoints.length < 2) return;
+        stopSimulation(); 
+
+        const speed = parseFloat(globalSpeedEl.value) || 5;
+        const positionProperty = new Cesium.SampledPositionProperty();
+        
+        let startTime = Cesium.JulianDate.fromDate(new Date());
+        let currentTime = startTime;
+
+        const startWp = waypoints[0];
+        const startCart = Cesium.Cartesian3.fromDegrees(startWp.lng, startWp.lat, startWp.terrainHeight + startWp.altitude);
+        positionProperty.addSample(currentTime, startCart);
+
+        for (let i = 1; i < waypoints.length; i++) {
+            const prevWp = waypoints[i-1];
+            const currWp = waypoints[i];
+            
+            const p1 = Cesium.Cartesian3.fromDegrees(prevWp.lng, prevWp.lat, prevWp.terrainHeight + prevWp.altitude);
+            const p2 = Cesium.Cartesian3.fromDegrees(currWp.lng, currWp.lat, currWp.terrainHeight + currWp.altitude);
+            
+            const dist = Cesium.Cartesian3.distance(p1, p2);
+            const timeToTravel = dist / speed; 
+            
+            currentTime = Cesium.JulianDate.addSeconds(currentTime, timeToTravel, new Cesium.JulianDate());
+            positionProperty.addSample(currentTime, p2);
+        }
+
+        const stopTime = currentTime;
+
+        viewer.clock.startTime = startTime;
+        viewer.clock.stopTime = stopTime;
+        viewer.clock.currentTime = startTime;
+        viewer.clock.clockRange = Cesium.ClockRange.CLAMPED; 
+        viewer.clock.multiplier = 1.0;
+        viewer.clock.shouldAnimate = true;
+
+        simDroneEntity = viewer.entities.add({
+            availability: new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({
+                start: startTime,
+                stop: stopTime
+            })]),
+            position: positionProperty,
+            orientation: new Cesium.VelocityOrientationProperty(positionProperty),
+            ellipsoid: {
+                radii: new Cesium.Cartesian3(0.15, 0.15, 0.05),
+                material: Cesium.Color.RED,
+                outline: true,
+                outlineColor: Cesium.Color.WHITE
+            },
+            path: {
+                resolution: 1,
+                material: new Cesium.PolylineGlowMaterialProperty({
+                    glowPower: 0.1,
+                    color: Cesium.Color.CYAN
+                }),
+                width: 5
+            }
+        });
+
+        viewer.trackedEntity = simDroneEntity;
+    });
+
+    stopSimBtn.addEventListener('click', stopSimulation);
+
+    function stopSimulation() {
+        if (simDroneEntity) {
+            viewer.entities.remove(simDroneEntity);
+            simDroneEntity = null;
+        }
+        viewer.trackedEntity = undefined;
+        viewer.clock.shouldAnimate = false;
     }
 
     // ========================================================
@@ -498,12 +731,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const targetPoi = pois.find(p => p.id === wp.linkedPoiId);
                 if (targetPoi) {
                     headingMode = 'towardPOI';
-                    poiStructureXml = `<wpml:waypointPoiPoint><wpml:waypointPoiCoordinate>${targetPoi.lng},${targetPoi.lat}</wpml:waypointPoiCoordinate><wpml:waypointPoiAltitude>${targetPoi.altitude}</wpml:waypointPoiAltitude></wpml:waypointPoiPoint>`;
+                    poiStructureXml = `
+            <wpml:waypointPoiPoint>
+              <wpml:waypointPoiCoordinate>${targetPoi.lng},${targetPoi.lat}</wpml:waypointPoiCoordinate>
+              <wpml:waypointPoiAltitude>${targetPoi.altitude}</wpml:waypointPoiAltitude>
+            </wpml:waypointPoiPoint>`;
                 }
             }
 
             let turnMode = wp.curveRadius > 0 ? 'coordinateTurn' : 'toPointAndStopWithDiscontinuityAngle';
-            let turnParamXml = `<wpml:waypointTurnParam><wpml:waypointTurnMode>${turnMode}</wpml:waypointTurnMode><wpml:waypointTurnDampingDist>${wp.curveRadius}</wpml:waypointTurnDampingDist></wpml:waypointTurnParam>`;
+            let turnParamXml = `
+            <wpml:waypointTurnParam>
+                <wpml:waypointTurnMode>${turnMode}</wpml:waypointTurnMode>
+                <wpml:waypointTurnDampingDist>${wp.curveRadius}</wpml:waypointTurnDampingDist>
+            </wpml:waypointTurnParam>`;
 
             let actionXml = `<wpml:hasAction>0</wpml:hasAction>`;
             if (wp.actions.length > 0) {
@@ -511,15 +752,50 @@ document.addEventListener('DOMContentLoaded', async () => {
                 wp.actions.forEach((act, aIdx) => {
                     let funcStr = act.type === 'photo' ? 'takePhoto' : 'hover';
                     let paramStr = act.type === 'photo' ? `<wpml:fileSuffix>wp_${index + 1}</wpml:fileSuffix>` : `<wpml:hoverTime>${act.param}</wpml:hoverTime>`;
-                    innerActions += `<wpml:action><wpml:actionId>${aIdx}</wpml:actionId><wpml:actionActuatorFunc>${funcStr}</wpml:actionActuatorFunc><wpml:actionActuatorFuncParam>${paramStr}</wpml:actionActuatorFuncParam></wpml:action>`;
+                    
+                    innerActions += `
+              <wpml:action>
+                <wpml:actionId>${aIdx}</wpml:actionId>
+                <wpml:actionActuatorFunc>${funcStr}</wpml:actionActuatorFunc>
+                <wpml:actionActuatorFuncParam>${paramStr}</wpml:actionActuatorFuncParam>
+              </wpml:action>`;
                 });
-                actionXml = `<wpml:hasAction>1</wpml:hasAction><wpml:actionGroup><wpml:actionGroupId>${index}</wpml:actionGroupId><wpml:actionGroupStartIndex>${index}</wpml:actionGroupStartIndex><wpml:actionGroupEndIndex>${index}</wpml:actionGroupEndIndex><wpml:actionGroupMode>sequence</wpml:actionGroupMode>${innerActions}</wpml:actionGroup>`;
+
+                actionXml = `
+            <wpml:hasAction>1</wpml:hasAction>
+            <wpml:actionGroup>
+              <wpml:actionGroupId>${index}</wpml:actionGroupId>
+              <wpml:actionGroupStartIndex>${index}</wpml:actionGroupStartIndex>
+              <wpml:actionGroupEndIndex>${index}</wpml:actionGroupEndIndex>
+              <wpml:actionGroupMode>sequence</wpml:actionGroupMode>${innerActions}
+            </wpml:actionGroup>`;
             }
 
-            waypointElementsXml += `<Placemark><Point><coordinates>${wp.lng},${wp.lat}</coordinates></Point><wpml:index>${index}</wpml:index><wpml:executeHeight>${wp.altitude}</wpml:executeHeight><wpml:waypointSpeed>${globalSpeed}</wpml:waypointSpeed><wpml:waypointHeadingMode>${headingMode}</wpml:waypointHeadingMode>${poiStructureXml}${turnParamXml}${actionXml}<wpml:useGlobalHeight>0</wpml:useGlobalHeight></Placemark>`;
+            waypointElementsXml += `
+          <Placemark>
+            <Point><coordinates>${wp.lng},${wp.lat}</coordinates></Point>
+            <wpml:index>${index}</wpml:index>
+            <wpml:executeHeight>${wp.altitude}</wpml:executeHeight>
+            <wpml:waypointSpeed>${globalSpeed}</wpml:waypointSpeed>
+            <wpml:waypointHeadingMode>${headingMode}</wpml:waypointHeadingMode>${poiStructureXml}${turnParamXml}${actionXml}
+            <wpml:useGlobalHeight>0</wpml:useGlobalHeight>
+          </Placemark>`;
         });
 
-        const kmlContent = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2" xmlns:wpml="http://www.dji.com/wpmz/1.0.4"><Document><wpml:createTime>${Date.now()}</wpml:createTime><wpml:updateTime>${Date.now()}</wpml:updateTime><Folder><wpml:templateId>0</wpml:templateId><wpml:executeHeightMode>relativeToStartPoint</wpml:executeHeightMode><wpml:waylineCoordinateSysParam><wpml:coordinateSysType>WGS84</wpml:coordinateSysType><wpml:heightMode>EGM96</wpml:heightMode></wpml:waylineCoordinateSysParam><wpml:autoFlightSpeed>${globalSpeed}</wpml:autoFlightSpeed><wpml:gimbalPitchMode>usePointSetting</wpml:gimbalPitchMode>${waypointElementsXml}</Folder></Document></kml>`;
+        const kmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:wpml="http://www.dji.com/wpmz/1.0.4">
+  <Document>
+    <wpml:createTime>${Date.now()}</wpml:createTime><wpml:updateTime>${Date.now()}</wpml:updateTime>
+    <Folder>
+      <wpml:templateId>0</wpml:templateId>
+      <wpml:executeHeightMode>relativeToStartPoint</wpml:executeHeightMode>
+      <wpml:waylineCoordinateSysParam><wpml:coordinateSysType>WGS84</wpml:coordinateSysType><wpml:heightMode>EGM96</wpml:heightMode></wpml:waylineCoordinateSysParam>
+      <wpml:autoFlightSpeed>${globalSpeed}</wpml:autoFlightSpeed>
+      <wpml:gimbalPitchMode>usePointSetting</wpml:gimbalPitchMode>
+      ${waypointElementsXml}
+    </Folder>
+  </Document>
+</kml>`;
 
         zip.folder("wpmz").file("template.kml", kmlContent);
         zip.generateAsync({ type: "blob" }).then(function(content) {
