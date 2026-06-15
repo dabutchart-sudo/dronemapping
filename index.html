@@ -3,37 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DJI Fly 2D Mission Planner</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <title>DJI Fly 3D Mission Planner</title>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
     <div id="sidebar">
-        <div style="display: flex; justify-content: space-between; align-items: baseline;">
-            <h2 style="margin-bottom: 0;">DJI Fly 2D Planner</h2>
-            <span style="font-size: 10px; color: #95a5a6; font-weight: bold;">v20 (2D Vector)</span>
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 15px;">
+            <h2 style="margin-bottom: 0; border: none; padding: 0;">DJI Fly 3D Planner</h2>
+            <span style="font-size: 10px; color: #95a5a6; font-weight: bold;">v40 (Crash Fix)</span>
         </div>
-        
-        <div id="mission-hud" style="background: #eafaf1; border: 1px solid #2ecc71; border-radius: 6px; padding: 10px; margin-top: 10px; margin-bottom: 10px;">
+
+        <div id="mission-hud" style="background: #eafaf1; border: 1px solid #2ecc71; border-radius: 6px; padding: 10px; margin-bottom: 15px;">
             <p id="mission-stats-counts" style="font-size: 13px; font-weight: bold; color: #2c3e50; margin: 0 0 5px 0;">Waypoints: 0 | POIs: 0</p>
             <p id="mission-stats-flight" style="font-size: 13px; color: #27ae60; margin: 0;">Distance: 0.0m | Time: 0m 0s</p>
         </div>
 
         <div class="global-controls">
-            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-bottom: 10px;">
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px;">
                 <div class="input-group">
-                    <label style="font-weight: bold; color: #2c3e50;">Action Mode</label>
-                    <select id="mode-select" class="mode-dropdown">
-                        <option value="waypoint">Place Waypoints</option>
-                        <option value="poi">Place POIs</option>
-                        <option value="orbit">Generate Orbit</option>
-                    </select>
-                </div>
-                <div class="input-group">
-                    <label style="font-weight: bold; color: #2c3e50;">Speed (m/s)</label>
+                    <label style="font-weight: bold; color: #2c3e50;">Global Speed (m/s)</label>
                     <input type="number" id="global-speed" value="5" min="1" max="15" step="0.5" style="font-weight: bold;">
                 </div>
+            </div>
+
+            <div class="input-group" style="margin-bottom: 15px;">
+                <label style="font-weight: bold; color: #2c3e50;">Finish Action</label>
+                <select id="finish-action" style="padding: 8px; border-radius: 4px; border: 1px solid #cbd5e0; font-family: inherit; font-size: 13px; background: white;">
+                    <option value="none">None (Hover in Place)</option>
+                    <option value="goHome" selected>Return to Home (RTH)</option>
+                    <option value="autoLand">Return to Start Position</option>
+                </select>
             </div>
             
             <div id="orbit-settings" class="settings-panel">
@@ -46,35 +47,44 @@
                 <small style="color: #e67e22; font-weight: bold; margin-top: 10px;">Click once to set center. Move mouse to size. Click again to confirm.</small>
             </div>
 
-            <div class="action-buttons">
-                <button id="undo-btn" class="secondary-btn">Undo Last</button>
-                <button id="clear-btn" class="danger-btn">Clear All</button>
+            <div id="grid-settings" class="settings-panel">
+                <h4>Grid Parameters</h4>
+                <div class="orbit-inputs" style="grid-template-columns: 1fr 1fr;">
+                    <div class="input-group"><label>Width (m)</label><input type="number" id="grid-width" value="40" min="5"></div>
+                    <div class="input-group"><label>Length (m)</label><input type="number" id="grid-length" value="40" min="5"></div>
+                    <div class="input-group"><label>Spacing (m)</label><input type="number" id="grid-spacing" value="10" min="2"></div>
+                    <div class="input-group"><label>Altitude (m)</label><input type="number" id="grid-alt" value="25" min="2"></div>
+                </div>
+                <small style="color: #e67e22; font-weight: bold; margin-top: 10px;">Click once to set center. Move mouse to size. Click again to confirm.</small>
             </div>
             
+            <hr>
+            
+            <label style="font-weight: bold; font-size: 13px; color: #2c3e50; margin-bottom: 8px; display: block;">Export Mission</label>
             <div class="export-buttons">
                 <button id="export-dji-btn" class="export-btn" disabled>DJI KMZ</button>
                 <button id="export-litchi-btn" class="export-btn" disabled>Litchi CSV</button>
             </div>
         </div>
+    </div>
 
-        <hr>
-
-        <div id="mission-overview-panel">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <h3 style="margin: 0;">Mission Overview</h3>
-                <button id="select-all-btn" class="secondary-btn" style="width: auto; padding: 4px 8px; font-size: 12px; margin: 0;">Select All</button>
-            </div>
-            <p style="font-size: 13px; color: #555; margin-top: 10px;">Click on the map to place points.</p>
-            <p style="font-size: 13px; color: #555;">Click a waypoint to edit it.<br>Hold <strong>Shift + Click</strong> to select multiple.</p>
+    <div id="map-container">
+        
+        <div id="mode-toolbar">
+            <button class="mode-toolbar-btn active" data-mode="select"><span style="font-size: 18px;">👆</span> Select</button>
+            <button class="mode-toolbar-btn" data-mode="waypoint"><span style="font-size: 18px;">📍</span> Waypoint</button>
+            <button class="mode-toolbar-btn" data-mode="poi"><span style="font-size: 18px;">🎯</span> POI</button>
+            <button class="mode-toolbar-btn" data-mode="orbit"><span style="font-size: 18px;">🔄</span> Orbit</button>
+            <button class="mode-toolbar-btn" data-mode="grid"><span style="font-size: 18px;">▦</span> Grid</button>
         </div>
 
-        <div id="wp-editor-panel" style="display: none; flex-direction: column; flex-grow: 1; overflow-y: auto;">
+        <div id="floating-item-panel" style="display: none;">
             <div style="display: flex; justify-content: space-between; align-items: center; background: #2c3e50; color: white; padding: 8px 12px; border-radius: 6px 6px 0 0;">
                 <h3 id="wp-editor-title" style="margin: 0; color: white; font-size: 16px;">Waypoint 1</h3>
                 <button id="deselect-btn" style="background: none; border: none; color: white; cursor: pointer; font-weight: bold;">✕</button>
             </div>
             
-            <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-top: none; border-radius: 0 0 6px 6px; padding: 15px;">
+            <div style="background: #ffffff; border: 1px solid #dee2e6; border-top: none; border-radius: 0 0 6px 6px; padding: 15px;">
                 <div id="single-wp-controls" style="display: flex; gap: 5px; margin-bottom: 15px;">
                     <button id="wp-move-top" class="wp-nav-btn" title="Move to First">⇈</button>
                     <button id="wp-move-up" class="wp-nav-btn" title="Move Up">↑</button>
@@ -85,13 +95,13 @@
 
                 <div class="orbit-inputs" style="grid-template-columns: 1fr 1fr; margin-bottom: 15px;">
                     <div class="input-group"><label>Altitude (m)</label><input type="number" id="wp-edit-alt" step="1"></div>
-                    <div class="input-group"><label>Curve (m)</label><input type="number" id="wp-edit-curve" min="0" step="1"></div>
+                    <div class="input-group"><label title="Leave empty to use Global Speed">Speed (m/s)</label><input type="number" id="wp-edit-speed" min="1" max="15" step="0.5" placeholder="Global"></div>
                 </div>
 
                 <div class="orbit-inputs" style="grid-template-columns: 2fr 1fr; margin-bottom: 15px;" id="poi-pitch-container">
                     <div class="input-group">
                         <label>Camera Goal (POI)</label>
-                        <select id="wp-edit-poi" style="padding: 6px; border: 1px solid #cbd5e0; border-radius: 4px; background: white;"></select>
+                        <select id="wp-edit-poi" style="padding: 6px; border: 1px solid #cbd5e0; border-radius: 4px; background: #f8f9fa;"></select>
                     </div>
                     <div class="input-group">
                         <label title="Calculated Gimbal Pitch">Pitch</label>
@@ -104,30 +114,72 @@
                 <label style="font-weight: bold; font-size: 13px; color: #2c3e50;">Actions</label>
                 <div id="wp-actions-list" style="margin-top: 10px;"></div>
                 <div style="display: flex; gap: 5px; margin-top: 10px;">
-                    <select id="add-action-type" style="flex-grow: 1; padding: 6px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 12px;">
+                    <select id="add-action-type" style="flex-grow: 1; padding: 6px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 12px; background: #f8f9fa;">
                         <option value="photo">Take Photo</option>
                         <option value="hover">Hover (Wait)</option>
                     </select>
                     <button id="add-action-btn" style="background: #2ecc71; color: white; border: none; border-radius: 4px; padding: 0 10px; cursor: pointer; font-weight: bold;">+ Add</button>
                 </div>
+
+                <div id="wp-navigator" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: #ecf0f1; border-radius: 6px; padding: 5px;">
+                        <button id="nav-prev" style="background: #bdc3c7; border: none; border-radius: 4px; padding: 8px 15px; cursor: pointer; font-weight: bold; font-size: 16px;">&lt;</button>
+                        <span id="nav-label" style="font-weight: bold; color: #2c3e50; font-size: 14px;">1 / 5</span>
+                        <button id="nav-next" style="background: #bdc3c7; border: none; border-radius: 4px; padding: 8px 15px; cursor: pointer; font-weight: bold; font-size: 16px;">&gt;</button>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div id="wp-navigator" style="display: none; margin-top: auto; padding: 15px 0;">
-            <div style="display: flex; justify-content: space-between; align-items: center; background: #ecf0f1; border-radius: 6px; padding: 5px;">
-                <button id="nav-prev" style="background: #bdc3c7; border: none; border-radius: 4px; padding: 8px 15px; cursor: pointer; font-weight: bold; font-size: 16px;">&lt;</button>
-                <span id="nav-label" style="font-weight: bold; color: #2c3e50; font-size: 14px;">1 / 5</span>
-                <button id="nav-next" style="background: #bdc3c7; border: none; border-radius: 4px; padding: 8px 15px; cursor: pointer; font-weight: bold; font-size: 16px;">&gt;</button>
+        <div id="map-controls-top-left" style="position: absolute; top: 20px; left: 20px; z-index: 1000; display: flex; gap: 8px;">
+            <button id="select-all-btn" class="map-btn" title="Select All Waypoints" style="font-size: 18px; color: #3498db;">▤</button>
+            <button id="undo-btn" class="map-btn" title="Undo Last" style="font-size: 18px;">↩️</button>
+            <button id="clear-btn" class="map-btn" title="Clear All" style="font-size: 18px; color: #e74c3c;">🗑️</button>
+        </div>
+
+        <div id="cesiumContainer"></div>
+        
+        <div id="sim-overlay" class="map-overlay" style="bottom: 30px; left: 20px; width: 260px; display: flex; flex-direction: column; gap: 8px;">
+            <h4 style="margin: 0; font-size: 14px; color: #2c3e50;">Simulation</h4>
+            <button id="sim-btn" class="export-btn" style="background-color: #3498db; width: 100%;" disabled>▶ Start Mission</button>
+            
+            <div id="sim-controls" style="display: none; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: bold; color: #34495e;">
+                    <span id="sim-current-time">00:00</span>
+                    <span id="sim-total-time">00:00</span>
+                </div>
+                <input type="range" id="sim-scrubber" min="0" max="100" value="0" step="0.1" style="width: 100%; cursor: pointer;">
+                <button id="sim-stop-btn" class="danger-btn" style="padding: 8px; font-size: 13px; width: 100%;">⏹ Stop Mission</button>
             </div>
+        </div>
+
+        <div id="map-controls-top-right" style="position: absolute; top: 20px; right: 20px; z-index: 1000; display: flex; flex-direction: column; gap: 10px;">
+            <button id="layer-toggle-btn" class="map-btn" title="Toggle Map/Hybrid View" style="font-size: 18px;">🗺️</button>
+            <button id="locate-btn" class="map-btn" title="Find My Location" style="font-size: 18px;">🎯</button>
+        </div>
+
+        <div id="camera-controls-container" style="position: absolute; bottom: 120px; right: 20px; z-index: 1000; display: grid; grid-template-columns: 35px 35px 35px; gap: 6px; justify-items: center; align-items: center;">
+            <div style="grid-column: 2;"><button id="pitch-up-btn" class="zoom-btn" title="Pitch Up">⇡</button></div>
+            <div style="grid-column: 3;"><button id="north-btn" class="zoom-btn" title="Reset North" style="font-size: 14px;">N</button></div>
+            
+            <div style="grid-column: 1;"><button id="rotate-left-btn" class="zoom-btn" title="Rotate Left">↺</button></div>
+            <div style="grid-column: 2;"><button id="pitch-down-btn" class="zoom-btn" title="Pitch Down">⇣</button></div>
+            <div style="grid-column: 3;"><button id="rotate-right-btn" class="zoom-btn" title="Rotate Right">↻</button></div>
+        </div>
+
+        <div id="custom-zoom-container" style="position: absolute; bottom: 30px; right: 20px; z-index: 1000; display: flex; flex-direction: column; gap: 8px;">
+            <button id="zoom-in-btn" class="zoom-btn">+</button>
+            <button id="zoom-out-btn" class="zoom-btn">−</button>
+        </div>
+        
+        <div style="position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.8); padding: 5px 10px; border-radius: 4px; font-size: 11px; z-index: 1000; pointer-events: none;">
+            <strong>3D Controls:</strong> Left-drag to pan | Right-drag to rotate | Arrows to pan | Wheel to zoom
         </div>
     </div>
 
-    <div id="map-container">
-        <div id="map"></div>
-    </div>
-
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="app.js?v=20"></script>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
+    <script src="config.js"></script> 
+    <script src="app.js?v=40"></script>
 </body>
 </html>
