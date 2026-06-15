@@ -3,16 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DJI Fly 2D Mission Planner</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <title>DJI Fly 3D Mission Planner</title>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
     <div id="sidebar">
         <div style="display: flex; justify-content: space-between; align-items: baseline;">
-            <h2 style="margin-bottom: 0;">DJI Fly 2D Planner</h2>
-            <span style="font-size: 10px; color: #95a5a6; font-weight: bold;">v21 (Select Mode)</span>
+            <h2 style="margin-bottom: 0;">DJI Fly 3D Planner</h2>
+            <span style="font-size: 10px; color: #95a5a6; font-weight: bold;">v22 (Cesium)</span>
         </div>
         
         <div id="mission-hud" style="background: #eafaf1; border: 1px solid #2ecc71; border-radius: 6px; padding: 10px; margin-top: 10px; margin-bottom: 10px;">
@@ -65,7 +66,7 @@
                 <h3 style="margin: 0;">Mission Overview</h3>
                 <button id="select-all-btn" class="secondary-btn" style="width: auto; padding: 4px 8px; font-size: 12px; margin: 0;">Select All</button>
             </div>
-            <p style="font-size: 13px; color: #555; margin-top: 10px;">Click on the map to place points.</p>
+            <p style="font-size: 13px; color: #555; margin-top: 10px;">Click on the 3D map to place points.</p>
             <p style="font-size: 13px; color: #555;">Click a waypoint to edit it.<br>Hold <strong>Shift + Click</strong> to select multiple.</p>
         </div>
 
@@ -127,8 +128,7 @@
         <div id="map"></div>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="app.js?v=21"></script>
+    <script src="app.js?v=22"></script>
 </body>
 </html>
