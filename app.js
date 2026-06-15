@@ -1,15 +1,39 @@
-// Version 40
+// Version 41 - With Token Diagnostics
 document.addEventListener('DOMContentLoaded', async () => {
 
+    const statusEl = document.getElementById('cesium-status');
+    let isTokenValid = false;
+
     // ========================================================
-    // CESIUM 3D INITIALIZATION1
+    // TOKEN DIAGNOSTIC TEST
     // ========================================================
     if (typeof CONFIG !== 'undefined' && CONFIG.CESIUM_ION_TOKEN) {
         Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
+        
+        try {
+            // Ping the Cesium API to verify the token specifically
+            const res = await fetch(`https://api.cesium.com/v1/assets?access_token=${CONFIG.CESIUM_ION_TOKEN}`);
+            if (res.status === 401) {
+                if (statusEl) { statusEl.innerText = 'Token Invalid ✖'; statusEl.style.background = '#e74c3c'; }
+                alert("CESIUM TOKEN ERROR: Your access token returned a 401 Unauthorized. The map will not load correctly until a valid token is placed in config.js.");
+            } else if (res.ok) {
+                if (statusEl) { statusEl.innerText = 'Token Valid ✔'; statusEl.style.background = '#2ecc71'; }
+                isTokenValid = true;
+            } else {
+                if (statusEl) { statusEl.innerText = `API Error: ${res.status}`; statusEl.style.background = '#e67e22'; }
+            }
+        } catch (e) {
+            if (statusEl) { statusEl.innerText = 'Network Error'; statusEl.style.background = '#e74c3c'; }
+            console.error("Token verification failed to reach Cesium API:", e);
+        }
     } else {
-        alert("Warning: CESIUM_ION_TOKEN not found in config.js. 3D maps may not load.");
+        if (statusEl) { statusEl.innerText = 'No Token Found'; statusEl.style.background = '#e74c3c'; }
+        alert("Warning: CESIUM_ION_TOKEN not found in config.js. 3D maps will not load.");
     }
 
+    // ========================================================
+    // CESIUM 3D INITIALIZATION
+    // ========================================================
     const viewer = new Cesium.Viewer('cesiumContainer', {
         terrain: Cesium.Terrain.fromWorldTerrain(), 
         animation: false,
@@ -27,9 +51,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     viewer.scene.globe.depthTestAgainstTerrain = true;
 
-    Cesium.createOsmBuildingsAsync().then(buildings => {
-        viewer.scene.primitives.add(buildings);
-    });
+    if (isTokenValid) {
+        Cesium.createOsmBuildingsAsync().then(buildings => {
+            viewer.scene.primitives.add(buildings);
+        });
+    }
 
     viewer.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(0.9006, 51.8959, 1000),
@@ -47,11 +73,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         credit: '© OpenStreetMap contributors'
     });
 
-    Cesium.createWorldImageryAsync({ style: Cesium.IonWorldImageryStyle.AERIAL_WITH_LABELS }).then(provider => {
-        imageryLayers.addImageryProvider(provider);
-    });
+    if (isTokenValid) {
+        Cesium.createWorldImageryAsync({ style: Cesium.IonWorldImageryStyle.AERIAL_WITH_LABELS }).then(provider => {
+            imageryLayers.addImageryProvider(provider);
+        });
+    } else {
+        imageryLayers.addImageryProvider(osmLayerProvider);
+        isSatellite = false;
+        document.getElementById('layer-toggle-btn').innerHTML = '🌍';
+    }
 
     document.getElementById('layer-toggle-btn').addEventListener('click', async (e) => {
+        if (!isTokenValid && isSatellite) return; // Prevent crashes if token is dead
+
         imageryLayers.removeAll();
         if (isSatellite) {
             imageryLayers.addImageryProvider(osmLayerProvider);
@@ -415,7 +449,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         redrawScene(false);
     });
 
-    // Helper functions for waypoint management
     function moveWaypoint(index, direction) {
         if (direction === -1 && index > 0) {
             const temp = waypoints[index];
@@ -584,7 +617,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
-handler.setInputAction(function(click) {
+    handler.setInputAction(function(click) {
         if (relocatingItem) {
             relocatingItem = null;
             viewer.scene.screenSpaceCameraController.enableInputs = true; 
@@ -624,7 +657,6 @@ handler.setInputAction(function(click) {
                         selectedWpIds = [itemId];
                     }
                 }
-                // FIXED: Removed tab switching logic, just redraw
                 redrawScene(false);
             } else if (itemType === 'poi') {
                 relocatingItem = { type: 'poi', id: itemId };
@@ -663,13 +695,13 @@ handler.setInputAction(function(click) {
             const wp = addWaypoint(coords.lat, coords.lng);
             selectedWpIds = [wp.id]; 
             actionStack.push({ type: 'waypoint', id: wp.id });
-            // FIXED: Removed tab switching logic, just redraw
             redrawScene(true);
         } else if (currentMode === 'poi') {
             const p = addPOI(coords.lat, coords.lng);
             actionStack.push({ type: 'poi', id: p.id });
         }
     }, Cesium.ScreenSpaceEventType.LEFT_UP);
+
     // ========================================================
     // LOGIC & DATA GENERATION
     // ========================================================
@@ -763,7 +795,9 @@ handler.setInputAction(function(click) {
             pois.forEach(poi => cartographics.push(Cesium.Cartographic.fromDegrees(poi.lng, poi.lat)));
 
             let tp = viewer.terrainProvider || viewer.scene.terrainProvider;
-            if (cartographics.length > 0 && tp) {
+            
+            // SECURITY CHECK: Only try to sample terrain if the token was validated successfully
+            if (cartographics.length > 0 && tp && isTokenValid) {
                 try {
                     await Cesium.sampleTerrainMostDetailed(tp, cartographics);
                 } catch (e) { console.warn("Terrain sample failed, defaulting to 0"); }
@@ -835,7 +869,6 @@ handler.setInputAction(function(click) {
                 if (targetPoi) {
                     const poiAbsoluteZ = targetPoi.altitude + (targetPoi._groundHeight || 0);
 
-                    // True Geographic Math for static render
                     const distance = getDistance(wp.lat, wp.lng, targetPoi.lat, targetPoi.lng);
                     const earthRadius = 6378137;
                     const dLng = (targetPoi.lng - wp.lng) * Math.cos(wp.lat * Math.PI / 180);
