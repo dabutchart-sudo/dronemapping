@@ -1,32 +1,26 @@
-// Version 42 - With Native Cesium Token Diagnostics
+// Version 43 - Fixed 3D Tile Click Interception
 document.addEventListener('DOMContentLoaded', async () => {
 
     const statusEl = document.getElementById('cesium-status');
     let isTokenValid = false;
 
     // ========================================================
-    // TOKEN DIAGNOSTIC TEST (Native Cesium Method)
+    // TOKEN DIAGNOSTIC TEST
     // ========================================================
     if (typeof CONFIG !== 'undefined' && CONFIG.CESIUM_ION_TOKEN) {
         Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
         
         try {
-            // Use Cesium's native resource loader to test Asset 1 (World Terrain)
             await Cesium.IonResource.fromAssetId(1);
-            
-            // If it resolves, the token is authorized
             if (statusEl) { statusEl.innerText = 'Token Valid ✔'; statusEl.style.background = '#2ecc71'; }
             isTokenValid = true;
-
         } catch (error) {
-            // If it rejects, the token is invalid or blocked
             if (statusEl) { statusEl.innerText = 'Token Invalid ✖'; statusEl.style.background = '#e74c3c'; }
             console.error("Cesium Token Error:", error);
-            alert("CESIUM TOKEN ERROR: The map will not load correctly. Please verify your token in config.js is active and correctly copied from your Cesium Ion dashboard.");
+            alert("CESIUM TOKEN ERROR: The map will not load correctly. Please verify your token in config.js is active.");
         }
     } else {
         if (statusEl) { statusEl.innerText = 'No Token Found'; statusEl.style.background = '#e74c3c'; }
-        alert("Warning: CESIUM_ION_TOKEN not found in config.js. 3D maps will not load.");
     }
 
     // ========================================================
@@ -82,7 +76,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     document.getElementById('layer-toggle-btn').addEventListener('click', async (e) => {
-        if (!isTokenValid && isSatellite) return; // Prevent crashes if token is dead
+        if (!isTokenValid && isSatellite) return; 
 
         imageryLayers.removeAll();
         if (isSatellite) {
@@ -546,15 +540,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.addEventListener('keydown', (e) => { if (e.key === 'Shift') isShiftDown = true; });
     document.addEventListener('keyup', (e) => { if (e.key === 'Shift') isShiftDown = false; });
 
+    // ==========================================
+    // UPDATED: Advanced Raycasting for 3D Tiles
+    // ==========================================
     function getEarthPosition(position) {
-        const ray = viewer.camera.getPickRay(position);
-        const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
+        let cartesian;
+        
+        // 1. Try to pick against 3D Tiles (OSM Buildings) or map features first
+        if (viewer.scene.pickPositionSupported) {
+            cartesian = viewer.scene.pickPosition(position);
+        }
+        
+        // 2. Fallback to the underlying globe/terrain if pickPosition misses
+        if (!cartesian) {
+            const ray = viewer.camera.getPickRay(position);
+            cartesian = viewer.scene.globe.pick(ray, viewer.scene);
+        }
+
         if (cartesian) {
             const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
-            return {
-                lat: Cesium.Math.toDegrees(cartographic.latitude),
-                lng: Cesium.Math.toDegrees(cartographic.longitude)
-            };
+            // Ensure clicks haven't bounced into deep space
+            if (cartographic && cartographic.height < 15000) {
+                return {
+                    lat: Cesium.Math.toDegrees(cartographic.latitude),
+                    lng: Cesium.Math.toDegrees(cartographic.longitude)
+                };
+            }
         }
         return null;
     }
@@ -794,7 +805,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             let tp = viewer.terrainProvider || viewer.scene.terrainProvider;
             
-            // SECURITY CHECK: Only try to sample terrain if the token was validated successfully
             if (cartographics.length > 0 && tp && isTokenValid) {
                 try {
                     await Cesium.sampleTerrainMostDetailed(tp, cartographics);
