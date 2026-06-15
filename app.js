@@ -1,36 +1,28 @@
-// Version 41 - With Corrected Token Diagnostics
+// Version 42 - With Native Cesium Token Diagnostics
 document.addEventListener('DOMContentLoaded', async () => {
 
     const statusEl = document.getElementById('cesium-status');
     let isTokenValid = false;
 
     // ========================================================
-    // TOKEN DIAGNOSTIC TEST (Corrected for 404/Auth)
+    // TOKEN DIAGNOSTIC TEST (Native Cesium Method)
     // ========================================================
     if (typeof CONFIG !== 'undefined' && CONFIG.CESIUM_ION_TOKEN) {
         Cesium.Ion.defaultAccessToken = CONFIG.CESIUM_ION_TOKEN;
         
         try {
-            // Ping the Cesium World Terrain endpoint using the proper Authorization header
-            const res = await fetch('https://api.cesium.com/v1/assets/1/endpoint', {
-                headers: {
-                    'Authorization': `Bearer ${CONFIG.CESIUM_ION_TOKEN}`
-                }
-            });
+            // Use Cesium's native resource loader to test Asset 1 (World Terrain)
+            await Cesium.IonResource.fromAssetId(1);
             
-            if (res.status === 401) {
-                if (statusEl) { statusEl.innerText = 'Token Invalid ✖'; statusEl.style.background = '#e74c3c'; }
-                alert("CESIUM TOKEN ERROR: Your access token returned a 401 Unauthorized. The token has expired, been deleted, or is invalid.");
-            } else if (res.ok) {
-                if (statusEl) { statusEl.innerText = 'Token Valid ✔'; statusEl.style.background = '#2ecc71'; }
-                isTokenValid = true;
-            } else {
-                if (statusEl) { statusEl.innerText = `API Error: ${res.status}`; statusEl.style.background = '#e67e22'; }
-                console.warn(`Unexpected Cesium API response: ${res.status}`);
-            }
-        } catch (e) {
-            if (statusEl) { statusEl.innerText = 'Network Error'; statusEl.style.background = '#e74c3c'; }
-            console.error("Token verification failed to reach Cesium API:", e);
+            // If it resolves, the token is authorized
+            if (statusEl) { statusEl.innerText = 'Token Valid ✔'; statusEl.style.background = '#2ecc71'; }
+            isTokenValid = true;
+
+        } catch (error) {
+            // If it rejects, the token is invalid or blocked
+            if (statusEl) { statusEl.innerText = 'Token Invalid ✖'; statusEl.style.background = '#e74c3c'; }
+            console.error("Cesium Token Error:", error);
+            alert("CESIUM TOKEN ERROR: The map will not load correctly. Please verify your token in config.js is active and correctly copied from your Cesium Ion dashboard.");
         }
     } else {
         if (statusEl) { statusEl.innerText = 'No Token Found'; statusEl.style.background = '#e74c3c'; }
