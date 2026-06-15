@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DJI Fly 2D Mission Planner</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <title>DJI Fly 3D Mission Planner</title>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
     <div id="sidebar">
         <div style="display: flex; justify-content: space-between; align-items: baseline;">
-            <h2 style="margin-bottom: 0;">DJI Fly 2D Planner</h2>
-            <span style="font-size: 10px; color: #95a5a6; font-weight: bold;">v21 (Select Mode)</span>
+            <h2 style="margin-bottom: 0;">DJI Fly 3D Planner</h2>
+            <span style="font-size: 10px; color: #95a5a6; font-weight: bold;">v20</span>
         </div>
         
         <div id="mission-hud" style="background: #eafaf1; border: 1px solid #2ecc71; border-radius: 6px; padding: 10px; margin-top: 10px; margin-bottom: 10px;">
@@ -25,8 +25,7 @@
                 <div class="input-group">
                     <label style="font-weight: bold; color: #2c3e50;">Action Mode</label>
                     <select id="mode-select" class="mode-dropdown">
-                        <option value="select">Select / Edit Mode</option>
-                        <option value="waypoint" selected>Place Waypoints</option>
+                        <option value="waypoint">Place Waypoints</option>
                         <option value="poi">Place POIs</option>
                         <option value="orbit">Generate Orbit</option>
                     </select>
@@ -55,6 +54,11 @@
             <div class="export-buttons">
                 <button id="export-dji-btn" class="export-btn" disabled>DJI KMZ</button>
                 <button id="export-litchi-btn" class="export-btn" disabled>Litchi CSV</button>
+            </div>
+
+            <div class="export-buttons" style="margin-top: 8px;">
+                <button id="play-sim-btn" class="export-btn sim-play-btn" disabled>▶ Play Sim</button>
+                <button id="stop-sim-btn" class="export-btn sim-stop-btn" disabled>■ Stop</button>
             </div>
         </div>
 
@@ -125,10 +129,23 @@
 
     <div id="map-container">
         <div id="map"></div>
+        
+        <div id="custom-nav-controls">
+            <button id="nav-north-btn" title="Reset North">🧭</button>
+            <button id="nav-home-btn" title="Go to Home">🏠</button>
+            <button id="nav-location-btn" title="My Location">📍</button>
+        </div>
+
+        <div id="zoom-controls">
+            <span class="zoom-label">+</span>
+            <input type="range" id="zoom-slider" min="10" max="20000" step="10" value="3000" orient="vertical">
+            <span class="zoom-label">-</span>
+        </div>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Cesium.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="app.js?v=21"></script>
+    <script src="config.js"></script>
+    <script src="app.js?v=20"></script>
 </body>
 </html>
