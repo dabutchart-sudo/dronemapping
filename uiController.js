@@ -17,6 +17,7 @@ const editorPanel = document.getElementById('wp-editor-panel');
 const navigatorPanel = document.getElementById('wp-navigator');
 const exportDjiBtn = document.getElementById('export-dji-btn');
 const exportLitchiBtn = document.getElementById('export-litchi-btn');
+const exportKmlBtn = document.getElementById('export-kml-btn');
 
 export function initUI(onStateChange) {
     notifyStateChange = onStateChange;
@@ -63,6 +64,7 @@ export function initUI(onStateChange) {
     // Exporters
     exportDjiBtn.addEventListener('click', () => generateDJI(parseFloat(globalSpeedEl.value) || 5));
     exportLitchiBtn.addEventListener('click', () => generateLitchi(parseFloat(globalSpeedEl.value) || 5));
+    exportKmlBtn.addEventListener('click', generateKML);
 
     // Editor Panel Interactions
     document.getElementById('wp-edit-alt').addEventListener('input', (e) => {
@@ -189,6 +191,7 @@ export function updateSidebarUI() {
 
     exportDjiBtn.disabled = waypoints.length < 2;
     exportLitchiBtn.disabled = waypoints.length < 2;
+    exportKmlBtn.disabled = waypoints.length < 2;
 
     if (selectedWpIds.length === 0) {
         overviewPanel.style.display = 'block';
