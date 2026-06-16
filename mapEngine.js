@@ -1,6 +1,7 @@
 // mapEngine.js
 import { currentMode, waypoints, pois, selectedWpIds, addWaypoint, addPOI, setSelectedWpIds, clearSelection, pushAction, setMode } from './stateManager.js';
 import { getOrbitParams, updateOrbitRadiusUI, setModeDropdown } from './uiController.js';
+import { CESIUM_ION_TOKEN } from './config.js'; // <-- Added import
 
 let viewer;
 let orbitStep = 0;
@@ -10,6 +11,9 @@ let notifyStateChange;
 
 export function initMap(onStateChange) {
     notifyStateChange = onStateChange;
+    
+    // Authenticate with your personal token
+    Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN; // <-- Added token assignment
     
     // Initialize Cesium
     viewer = new Cesium.Viewer('map', {
