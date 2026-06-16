@@ -2,6 +2,7 @@
 import { waypoints, pois, selectedWpIds, actionStack, setMode, getWpIndex, deleteWaypoint, moveWaypoint, setSelectedWpIds, popAction, clearAll } from './stateManager.js';
 import { generateDJI } from './exportDJI.js';
 import { generateLitchi } from './exportLitchi.js';
+import { generateKML } from './exportKML.js';
 import { resetOrbitState } from './mapEngine.js';
 
 let notifyStateChange;
