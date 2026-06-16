@@ -15,6 +15,7 @@ h2 { margin-top: 0; font-size: 20px; color: #2c3e50; border-bottom: 2px solid #e
 .export-btn:disabled { background-color: #bdc3c7 !important; cursor: not-allowed; }
 #export-dji-btn { background-color: #2ecc71; }
 #export-litchi-btn { background-color: #8e44ad; }
+#export-kml-btn { background-color: #3498db; }
 
 .settings-panel { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px; margin-bottom: 10px; display: none; }
 .settings-panel h4 { margin: 0 0 10px 0; font-size: 14px; color: #34495e; }
