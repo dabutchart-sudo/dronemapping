@@ -1,29 +1,24 @@
 // mapEngine.js
 import { currentMode, waypoints, pois, selectedWpIds, addWaypoint, addPOI, setSelectedWpIds, clearSelection, pushAction, setMode } from './stateManager.js';
 import { getOrbitParams, updateOrbitRadiusUI, setModeDropdown } from './uiController.js';
-import { CESIUM_ION_TOKEN } from './config.js'; // <-- Added import
+import { CESIUM_ION_TOKEN } from './config.js'; 
 
 let viewer;
 let orbitStep = 0;
 let orbitCenterCartesian = null;
 let orbitPreviewEntity = null;
+let dynamicOrbitRadius = 5; // Added to store the live radius
 let notifyStateChange;
 
 export function initMap(onStateChange) {
     notifyStateChange = onStateChange;
     
     // Authenticate with your personal token
-    Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN; // <-- Added token assignment
+    Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN; 
     
-// Initialize Cesium
+    // Initialize Cesium
     viewer = new Cesium.Viewer('map', {
         terrain: Cesium.Terrain.fromWorldTerrain(),
-        
-        // ADD THIS: Forces OpenStreetMap imagery instead of the default Bing Maps
-        baseLayer: new Cesium.ImageryLayer(new Cesium.OpenStreetMapImageryProvider({
-            url : 'https://tile.openstreetmap.org/'
-        })),
-
         baseLayerPicker: false,
         geocoder: false,
         homeButton: false,
@@ -45,34 +40,22 @@ export function initMap(onStateChange) {
 
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
-    // Mouse Move (For Orbit Preview)
+    // OPTIMIZED: Mouse Move (For Orbit Preview)
     handler.setInputAction(function (movement) {
         if (currentMode === 'orbit' && orbitStep === 1 && orbitCenterCartesian) {
             const ray = viewer.camera.getPickRay(movement.endPosition);
             const position = viewer.scene.globe.pick(ray, viewer.scene);
             
             if (Cesium.defined(position)) {
+                // Just update the variable and UI. Do NOT destroy/recreate the entity here.
                 let distance = Cesium.Cartesian3.distance(orbitCenterCartesian, position);
-                const currentOrbitRadius = Math.max(5, distance);
-                updateOrbitRadiusUI(Math.round(currentOrbitRadius));
-                
-                if (orbitPreviewEntity) viewer.entities.remove(orbitPreviewEntity);
-                
-                orbitPreviewEntity = viewer.entities.add({
-                    position: orbitCenterCartesian,
-                    ellipse: {
-                        semiMinorAxis: currentOrbitRadius,
-                        semiMajorAxis: currentOrbitRadius,
-                        material: Cesium.Color.PURPLE.withAlpha(0.3),
-                        outline: true,
-                        outlineColor: Cesium.Color.PURPLE
-                    }
-                });
+                dynamicOrbitRadius = Math.max(5, distance);
+                updateOrbitRadiusUI(Math.round(dynamicOrbitRadius));
             }
         }
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
-    // Mouse Clicks
+    // OPTIMIZED: Mouse Clicks
     handler.setInputAction(function (click) {
         const ray = viewer.camera.getPickRay(click.position);
         const position = viewer.scene.globe.pick(ray, viewer.scene);
@@ -103,9 +86,26 @@ export function initMap(onStateChange) {
                 if (orbitStep === 0) {
                     orbitStep = 1;
                     orbitCenterCartesian = position;
+                    dynamicOrbitRadius = 5; // Reset radius
+                    
+                    // Create the entity ONCE using CallbackProperty for ultra-smooth scaling
+                    orbitPreviewEntity = viewer.entities.add({
+                        position: orbitCenterCartesian,
+                        ellipse: {
+                            semiMinorAxis: new Cesium.CallbackProperty(() => dynamicOrbitRadius, false),
+                            semiMajorAxis: new Cesium.CallbackProperty(() => dynamicOrbitRadius, false),
+                            material: Cesium.Color.PURPLE.withAlpha(0.3),
+                            outline: true,
+                            outlineColor: Cesium.Color.PURPLE
+                        }
+                    });
+
                 } else if (orbitStep === 1) {
                     orbitStep = 0;
-                    if (orbitPreviewEntity) viewer.entities.remove(orbitPreviewEntity);
+                    if (orbitPreviewEntity) {
+                        viewer.entities.remove(orbitPreviewEntity);
+                        orbitPreviewEntity = null;
+                    }
                     const centerCartographic = Cesium.Cartographic.fromCartesian(orbitCenterCartesian);
                     generateOrbit(Cesium.Math.toDegrees(centerCartographic.latitude), Cesium.Math.toDegrees(centerCartographic.longitude));
                     orbitCenterCartesian = null;
@@ -132,6 +132,7 @@ export function resetOrbitState() {
     orbitCenterCartesian = null;
     if (orbitPreviewEntity && viewer) {
         viewer.entities.remove(orbitPreviewEntity);
+        orbitPreviewEntity = null;
     }
 }
 
