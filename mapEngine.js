@@ -15,9 +15,15 @@ export function initMap(onStateChange) {
     // Authenticate with your personal token
     Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN; // <-- Added token assignment
     
-    // Initialize Cesium
+// Initialize Cesium
     viewer = new Cesium.Viewer('map', {
         terrain: Cesium.Terrain.fromWorldTerrain(),
+        
+        // ADD THIS: Forces OpenStreetMap imagery instead of the default Bing Maps
+        baseLayer: new Cesium.ImageryLayer(new Cesium.OpenStreetMapImageryProvider({
+            url : 'https://tile.openstreetmap.org/'
+        })),
+
         baseLayerPicker: false,
         geocoder: false,
         homeButton: false,
