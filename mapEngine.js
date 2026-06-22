@@ -1,6 +1,6 @@
 // mapEngine.js
 import { currentMode, waypoints, pois, selectedWpIds, selectedPoiId, movingEntity, addWaypoint, addPOI, setSelectedWpIds, setSelectedPoiId, clearSelection, setMovingEntity, clearMovingEntity, updateWpLocation, updatePoiLocation, pushAction, setMode } from './stateManager.js';
-import { getOrbitParams, updateOrbitRadiusUI, setModeDropdown } from './uiController.js';
+import { getOrbitParams, updateOrbitRadiusUI, updateModeUI } from './uiController.js';
 import { CESIUM_ION_TOKEN } from './config.js'; 
 
 let viewer;
@@ -153,46 +153,39 @@ export function initMap(onStateChange) {
 }
 
 function setupCameraControls() {
-    // 1. UI Buttons
-    document.getElementById('nav-zoom-in').addEventListener('click', () => {
-        viewer.camera.zoomIn(viewer.camera.positionCartographic.height * 0.2);
-    });
-    
-    document.getElementById('nav-zoom-out').addEventListener('click', () => {
-        viewer.camera.zoomOut(viewer.camera.positionCartographic.height * 0.2);
-    });
-    
-    document.getElementById('nav-tilt-up').addEventListener('click', () => {
-        viewer.camera.lookUp(Cesium.Math.toRadians(5));
-    });
-    
-    document.getElementById('nav-tilt-down').addEventListener('click', () => {
-        viewer.camera.lookDown(Cesium.Math.toRadians(5));
-    });
+    // UI Button bindings
+    const zoomInBtn = document.getElementById('nav-zoom-in');
+    const zoomOutBtn = document.getElementById('nav-zoom-out');
+    const tiltUpBtn = document.getElementById('nav-tilt-up');
+    const tiltDownBtn = document.getElementById('nav-tilt-down');
 
-    // 2. Smooth Keyboard Panning
+    if (zoomInBtn) zoomInBtn.addEventListener('click', () => { viewer.camera.zoomIn(viewer.camera.positionCartographic.height * 0.2); });
+    if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => { viewer.camera.zoomOut(viewer.camera.positionCartographic.height * 0.2); });
+    if (tiltUpBtn) tiltUpBtn.addEventListener('click', () => { viewer.camera.lookUp(Cesium.Math.toRadians(10)); });
+    if (tiltDownBtn) tiltDownBtn.addEventListener('click', () => { viewer.camera.lookDown(Cesium.Math.toRadians(10)); });
+
+    // Smooth Keyboard Navigation binding to window to ensure global capture
     const activeKeys = {};
-    
-    document.addEventListener('keydown', (e) => {
-        // Ignore key presses if user is typing in an input field (like altitude/radius)
+    window.addEventListener('keydown', (e) => {
+        // Prevent map movement if typing in an input or select
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
         
         if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
             activeKeys[e.key] = true;
-            e.preventDefault(); // Stop the browser window from scrolling
+            e.preventDefault(); 
         }
-    });
+    }, { passive: false });
 
-    document.addEventListener('keyup', (e) => {
+    window.addEventListener('keyup', (e) => {
         if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
             activeKeys[e.key] = false;
         }
     });
 
-    // Bind to the render loop for silky smooth 60fps movement
-    viewer.clock.onTick.addEventListener(() => {
-        const height = viewer.camera.positionCartographic.height;
-        const moveRate = height * 0.01; // Movement speed scales with altitude
+    // Tap into Cesium's render loop for smooth continuous movement
+    viewer.scene.preUpdate.addEventListener(() => {
+        const cameraHeight = viewer.camera.positionCartographic.height;
+        const moveRate = cameraHeight * 0.015; // Speed scales with height
 
         if (activeKeys['ArrowUp']) viewer.camera.moveUp(moveRate);
         if (activeKeys['ArrowDown']) viewer.camera.moveDown(moveRate);
@@ -226,7 +219,7 @@ function generateOrbit(centerLat, centerLng) {
     
     pushAction({ type: 'orbit', poiId: centerPoi.id, wpIds: generatedWpIds });
     setMode('select'); 
-    setModeDropdown('select');
+    updateModeUI('select');
     notifyStateChange();
 }
 
