@@ -6,6 +6,8 @@ export const waypoints = [];
 export const pois = [];
 export const actionStack = [];
 export const selectedWpIds = [];
+export let selectedPoiId = null;
+export let movingEntity = null; // Stores { type: 'wp' | 'poi', id: string }
 
 // 2. Mode & Selection Handling
 export function setMode(mode) {
@@ -13,12 +15,40 @@ export function setMode(mode) {
 }
 
 export function setSelectedWpIds(ids) {
-    selectedWpIds.length = 0; // Clear existing
+    selectedWpIds.length = 0; // Clear existing WP selection
     ids.forEach(id => selectedWpIds.push(id));
+    selectedPoiId = null; // Clear POI selection
+    movingEntity = null; // Stop moving if selection is forced via code
+}
+
+export function setSelectedPoiId(id) {
+    selectedPoiId = id;
+    selectedWpIds.length = 0; // Clear WP selection
+    movingEntity = null;
 }
 
 export function clearSelection() {
     selectedWpIds.length = 0;
+    selectedPoiId = null;
+    movingEntity = null;
+}
+
+export function setMovingEntity(type, id) {
+    movingEntity = { type, id };
+}
+
+export function clearMovingEntity() {
+    movingEntity = null;
+}
+
+export function updateWpLocation(id, lat, lng) {
+    const wp = waypoints.find(w => w.id === id);
+    if (wp) { wp.lat = lat; wp.lng = lng; }
+}
+
+export function updatePoiLocation(id, lat, lng) {
+    const p = pois.find(p => p.id === id);
+    if (p) { p.lat = lat; p.lng = lng; }
 }
 
 // 3. Waypoint & POI Creation
@@ -57,11 +87,16 @@ export function deleteWaypoint(id) {
     
     const selectedIndex = selectedWpIds.indexOf(id);
     if (selectedIndex !== -1) selectedWpIds.splice(selectedIndex, 1);
+    
+    if (movingEntity && movingEntity.id === id) movingEntity = null;
 }
 
 export function deletePOI(id) {
     const index = pois.findIndex(p => p.id === id);
     if (index !== -1) pois.splice(index, 1);
+    
+    if (selectedPoiId === id) selectedPoiId = null;
+    if (movingEntity && movingEntity.id === id) movingEntity = null;
 }
 
 export function moveWaypoint(index, direction) {
@@ -94,4 +129,6 @@ export function clearAll() {
     pois.length = 0;
     actionStack.length = 0;
     selectedWpIds.length = 0;
+    selectedPoiId = null;
+    movingEntity = null;
 }
