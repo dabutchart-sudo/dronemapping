@@ -1,5 +1,5 @@
 // mapEngine.js
-import { currentMode, waypoints, pois, selectedWpIds, addWaypoint, addPOI, setSelectedWpIds, clearSelection, pushAction, setMode } from './stateManager.js';
+import { currentMode, waypoints, pois, selectedWpIds, selectedPoiId, movingEntity, addWaypoint, addPOI, setSelectedWpIds, setSelectedPoiId, clearSelection, setMovingEntity, clearMovingEntity, updateWpLocation, updatePoiLocation, pushAction, setMode } from './stateManager.js';
 import { getOrbitParams, updateOrbitRadiusUI, setModeDropdown } from './uiController.js';
 import { CESIUM_ION_TOKEN } from './config.js'; 
 
@@ -7,16 +7,15 @@ let viewer;
 let orbitStep = 0;
 let orbitCenterCartesian = null;
 let orbitPreviewEntity = null;
-let dynamicOrbitRadius = 5; // Added to store the live radius
+let dynamicOrbitRadius = 5; 
 let notifyStateChange;
+let liveMoveCartesian = null; // Tracks mouse position during move mode
 
 export function initMap(onStateChange) {
     notifyStateChange = onStateChange;
     
-    // Authenticate with your personal token
     Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN; 
     
-    // Initialize Cesium
     viewer = new Cesium.Viewer('map', {
         terrain: Cesium.Terrain.fromWorldTerrain(),
         baseLayerPicker: false,
@@ -29,7 +28,6 @@ export function initMap(onStateChange) {
         animation: false
     });
 
-    // Default camera position
     viewer.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(0.9006, 51.8959, 800),
         orientation: {
@@ -40,43 +38,77 @@ export function initMap(onStateChange) {
 
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
-    // OPTIMIZED: Mouse Move (For Orbit Preview)
     handler.setInputAction(function (movement) {
-        if (currentMode === 'orbit' && orbitStep === 1 && orbitCenterCartesian) {
-            const ray = viewer.camera.getPickRay(movement.endPosition);
-            const position = viewer.scene.globe.pick(ray, viewer.scene);
-            
-            if (Cesium.defined(position)) {
-                // Just update the variable and UI. Do NOT destroy/recreate the entity here.
-                let distance = Cesium.Cartesian3.distance(orbitCenterCartesian, position);
-                dynamicOrbitRadius = Math.max(5, distance);
-                updateOrbitRadiusUI(Math.round(dynamicOrbitRadius));
-            }
+        const ray = viewer.camera.getPickRay(movement.endPosition);
+        const position = viewer.scene.globe.pick(ray, viewer.scene);
+        
+        // Dynamic Orbit Sizing
+        if (currentMode === 'orbit' && orbitStep === 1 && orbitCenterCartesian && Cesium.defined(position)) {
+            let distance = Cesium.Cartesian3.distance(orbitCenterCartesian, position);
+            dynamicOrbitRadius = Math.max(5, distance);
+            updateOrbitRadiusUI(Math.round(dynamicOrbitRadius));
+        }
+
+        // Dynamic Entity Moving
+        if (currentMode === 'select' && movingEntity && Cesium.defined(position)) {
+            liveMoveCartesian = position;
         }
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
-    // OPTIMIZED: Mouse Clicks
     handler.setInputAction(function (click) {
         const ray = viewer.camera.getPickRay(click.position);
         const position = viewer.scene.globe.pick(ray, viewer.scene);
         const pickedObject = viewer.scene.pick(click.position);
 
-        // 1. Handle clicking existing entities
-        if (Cesium.defined(pickedObject) && pickedObject.id && pickedObject.id.properties) {
-            const itemType = pickedObject.id.properties.type.getValue();
-            const itemId = pickedObject.id.properties.id.getValue();
-            
-            if (itemType === 'wp') {
-                setSelectedWpIds([itemId]);
+        if (currentMode === 'select') {
+            // 1. Drop a moving entity
+            if (movingEntity) {
+                if (liveMoveCartesian) {
+                    const carto = Cesium.Cartographic.fromCartesian(liveMoveCartesian);
+                    const lat = Cesium.Math.toDegrees(carto.latitude);
+                    const lng = Cesium.Math.toDegrees(carto.longitude);
+                    if (movingEntity.type === 'wp') updateWpLocation(movingEntity.id, lat, lng);
+                    if (movingEntity.type === 'poi') updatePoiLocation(movingEntity.id, lat, lng);
+                }
+                clearMovingEntity();
                 notifyStateChange();
-            } else if (itemType === 'poi') {
+                return;
+            }
+
+            // 2. Select or enter Move mode
+            if (Cesium.defined(pickedObject) && pickedObject.id && pickedObject.id.properties) {
+                const itemType = pickedObject.id.properties.type.getValue();
+                const itemId = pickedObject.id.properties.id.getValue();
+                
+                if (itemType === 'wp') {
+                    if (selectedWpIds.length === 1 && selectedWpIds[0] === itemId) {
+                        setMovingEntity('wp', itemId);
+                        const wp = waypoints.find(w => w.id === itemId);
+                        liveMoveCartesian = Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, wp.altitude);
+                    } else {
+                        setSelectedWpIds([itemId]);
+                    }
+                    notifyStateChange();
+                    return; 
+                } else if (itemType === 'poi') {
+                    if (selectedPoiId === itemId) {
+                        setMovingEntity('poi', itemId);
+                        const p = pois.find(x => x.id === itemId);
+                        liveMoveCartesian = Cesium.Cartesian3.fromDegrees(p.lng, p.lat, p.altitude);
+                    } else {
+                        setSelectedPoiId(itemId);
+                    }
+                    notifyStateChange();
+                    return;
+                }
+            } else {
                 clearSelection();
                 notifyStateChange();
+                return;
             }
-            return; 
         }
 
-        // 2. Handle placement on globe
+        // Handle Placement logic
         if (Cesium.defined(position) && currentMode !== 'select') {
             const cartographic = Cesium.Cartographic.fromCartesian(position);
             const lng = Cesium.Math.toDegrees(cartographic.longitude);
@@ -86,9 +118,8 @@ export function initMap(onStateChange) {
                 if (orbitStep === 0) {
                     orbitStep = 1;
                     orbitCenterCartesian = position;
-                    dynamicOrbitRadius = 5; // Reset radius
+                    dynamicOrbitRadius = 5; 
                     
-                    // Create the entity ONCE using CallbackProperty for ultra-smooth scaling
                     orbitPreviewEntity = viewer.entities.add({
                         position: orbitCenterCartesian,
                         ellipse: {
@@ -120,9 +151,6 @@ export function initMap(onStateChange) {
                 pushAction({ type: 'poi', id: p.id });
                 notifyStateChange();
             }
-        } else if (currentMode === 'select') {
-            clearSelection();
-            notifyStateChange();
         }
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 }
@@ -160,82 +188,140 @@ export function redrawMap3D() {
     if (!viewer) return;
     viewer.entities.removeAll();
 
+    // 1. Render POIs
     pois.forEach((poi) => {
-        const poiCartesian = Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, poi.altitude);
-        const groundCartesian = Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, 0);
+        const isMoving = movingEntity && movingEntity.type === 'poi' && movingEntity.id === poi.id;
+        const isSelected = selectedPoiId === poi.id;
+        
+        let pointColor = isSelected ? Cesium.Color.YELLOW : Cesium.Color.ORANGE;
+        if (isMoving) pointColor = Cesium.Color.LIME;
 
-        // 1. Ground Shadow (Footprint)
-        viewer.entities.add({
-            position: groundCartesian,
-            point: { pixelSize: 10, color: Cesium.Color.BLACK.withAlpha(0.5), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND }
-        });
+        let positionProp, groundProp;
+        if (isMoving) {
+            positionProp = new Cesium.CallbackProperty(() => {
+                if (!liveMoveCartesian) return Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, poi.altitude);
+                const carto = Cesium.Cartographic.fromCartesian(liveMoveCartesian);
+                return Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, poi.altitude);
+            }, false);
+            groundProp = new Cesium.CallbackProperty(() => {
+                if (!liveMoveCartesian) return Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, 0);
+                const carto = Cesium.Cartographic.fromCartesian(liveMoveCartesian);
+                return Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, 0);
+            }, false);
+        } else {
+            positionProp = Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, poi.altitude);
+            groundProp = Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, 0);
+        }
 
-        // 2. POI Marker
         viewer.entities.add({
-            position: poiCartesian,
+            position: positionProp,
             properties: { type: 'poi', id: poi.id },
-            point: { pixelSize: 12, color: Cesium.Color.ORANGE, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.NONE },
+            point: { pixelSize: isSelected || isMoving ? 16 : 12, color: pointColor, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.NONE },
             label: { text: `${poi.name}\n(${poi.altitude}m)`, font: '12pt sans-serif', fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -15) }
         });
         
-        // 3. Glowing Vertical Tether
         viewer.entities.add({
             polyline: { 
-                positions: [groundCartesian, poiCartesian], 
-                width: 4, 
-                material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.15, color: Cesium.Color.ORANGE }) 
+                positions: new Cesium.CallbackProperty(() => {
+                    let p1 = groundProp.getValue ? groundProp.getValue(viewer.clock.currentTime) : groundProp;
+                    let p2 = positionProp.getValue ? positionProp.getValue(viewer.clock.currentTime) : positionProp;
+                    return [p1, p2];
+                }, false),
+                width: isSelected || isMoving ? 4 : 2, 
+                material: new Cesium.PolylineDashMaterialProperty({ color: pointColor, dashLength: 10 }) 
             }
         });
     });
 
-    const wpPositions = [];
+    // 2. Render Waypoints
     waypoints.forEach((wp, index) => {
+        const isMoving = movingEntity && movingEntity.type === 'wp' && movingEntity.id === wp.id;
         const isSelected = selectedWpIds.includes(wp.id);
-        const color = isSelected ? Cesium.Color.YELLOW : Cesium.Color.DODGERBLUE;
         
-        const wpCartesian = Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, wp.altitude);
-        const groundCartesian = Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, 0);
+        let pointColor = isSelected ? Cesium.Color.YELLOW : Cesium.Color.DODGERBLUE;
+        if (isMoving) pointColor = Cesium.Color.LIME;
         
-        wpPositions.push(wpCartesian);
+        let positionProp, groundProp;
+        if (isMoving) {
+            positionProp = new Cesium.CallbackProperty(() => {
+                if (!liveMoveCartesian) return Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, wp.altitude);
+                const carto = Cesium.Cartographic.fromCartesian(liveMoveCartesian);
+                return Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, wp.altitude);
+            }, false);
+            groundProp = new Cesium.CallbackProperty(() => {
+                if (!liveMoveCartesian) return Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, 0);
+                const carto = Cesium.Cartographic.fromCartesian(liveMoveCartesian);
+                return Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, 0);
+            }, false);
+        } else {
+            positionProp = Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, wp.altitude);
+            groundProp = Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, 0);
+        }
 
-        // 1. Ground Shadow (Footprint)
         viewer.entities.add({
-            position: groundCartesian,
-            point: { pixelSize: isSelected ? 12 : 8, color: Cesium.Color.BLACK.withAlpha(0.6), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND }
-        });
-
-        // 2. Waypoint Marker
-        viewer.entities.add({
-            position: wpCartesian,
+            position: positionProp,
             properties: { type: 'wp', id: wp.id },
-            point: { pixelSize: isSelected ? 16 : 12, color: color, outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
+            point: { pixelSize: isSelected || isMoving ? 16 : 12, color: pointColor, outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
             label: { text: `WP ${index + 1}\n(${wp.altitude}m)`, font: '12pt sans-serif', fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -15) }
         });
 
-        // 3. Glowing Vertical Tether
         viewer.entities.add({
             polyline: { 
-                positions: [groundCartesian, wpCartesian], 
-                width: isSelected ? 6 : 3, 
-                material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.2, color: color }) 
+                positions: new Cesium.CallbackProperty(() => {
+                    let p1 = groundProp.getValue ? groundProp.getValue(viewer.clock.currentTime) : groundProp;
+                    let p2 = positionProp.getValue ? positionProp.getValue(viewer.clock.currentTime) : positionProp;
+                    return [p1, p2];
+                }, false),
+                width: isSelected || isMoving ? 4 : 2, 
+                material: new Cesium.PolylineDashMaterialProperty({ color: pointColor, dashLength: 10 }) 
             }
         });
 
-        // Camera Pitch Line (to POI)
+        // 3. Camera Pitch Line (to POI)
         if (wp.linkedPoiId !== 'none') {
             const targetPoi = pois.find(p => p.id === wp.linkedPoiId);
             if (targetPoi) {
                 viewer.entities.add({
-                    polyline: { positions: [wpCartesian, Cesium.Cartesian3.fromDegrees(targetPoi.lng, targetPoi.lat, targetPoi.altitude)], width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.YELLOW.withAlpha(0.8) }) }
+                    polyline: { 
+                        positions: new Cesium.CallbackProperty(() => {
+                            let p1 = positionProp.getValue ? positionProp.getValue(viewer.clock.currentTime) : positionProp;
+                            
+                            let p2;
+                            const isPoiMoving = movingEntity && movingEntity.type === 'poi' && movingEntity.id === targetPoi.id;
+                            if (isPoiMoving && liveMoveCartesian) {
+                                const carto = Cesium.Cartographic.fromCartesian(liveMoveCartesian);
+                                p2 = Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, targetPoi.altitude);
+                            } else {
+                                p2 = Cesium.Cartesian3.fromDegrees(targetPoi.lng, targetPoi.lat, targetPoi.altitude);
+                            }
+
+                            return [p1, p2];
+                        }, false), 
+                        width: 2, 
+                        material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.YELLOW.withAlpha(0.8) }) 
+                    }
                 });
             }
         }
     });
 
-    // Flight Path Line
-    if (wpPositions.length > 1) {
+    // 4. Flight Path Line
+    if (waypoints.length > 1) {
         viewer.entities.add({
-            polyline: { positions: wpPositions, width: 4, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.CYAN }) }
+            polyline: { 
+                positions: new Cesium.CallbackProperty(() => {
+                    return waypoints.map(wp => {
+                        const isMoving = movingEntity && movingEntity.type === 'wp' && movingEntity.id === wp.id;
+                        if (isMoving && liveMoveCartesian) {
+                            const carto = Cesium.Cartographic.fromCartesian(liveMoveCartesian);
+                            return Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, wp.altitude);
+                        }
+                        return Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, wp.altitude);
+                    });
+                }, false), 
+                width: 4, 
+                material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.CYAN }) 
+            }
         });
     }
 }
