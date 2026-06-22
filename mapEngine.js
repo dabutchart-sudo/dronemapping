@@ -9,7 +9,7 @@ let orbitCenterCartesian = null;
 let orbitPreviewEntity = null;
 let dynamicOrbitRadius = 5; 
 let notifyStateChange;
-let liveMoveCartesian = null; // Tracks mouse position during move mode
+let liveMoveCartesian = null; 
 
 export function initMap(onStateChange) {
     notifyStateChange = onStateChange;
@@ -36,20 +36,20 @@ export function initMap(onStateChange) {
         }
     });
 
+    setupCameraControls();
+
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
     handler.setInputAction(function (movement) {
         const ray = viewer.camera.getPickRay(movement.endPosition);
         const position = viewer.scene.globe.pick(ray, viewer.scene);
         
-        // Dynamic Orbit Sizing
         if (currentMode === 'orbit' && orbitStep === 1 && orbitCenterCartesian && Cesium.defined(position)) {
             let distance = Cesium.Cartesian3.distance(orbitCenterCartesian, position);
             dynamicOrbitRadius = Math.max(5, distance);
             updateOrbitRadiusUI(Math.round(dynamicOrbitRadius));
         }
 
-        // Dynamic Entity Moving
         if (currentMode === 'select' && movingEntity && Cesium.defined(position)) {
             liveMoveCartesian = position;
         }
@@ -61,7 +61,6 @@ export function initMap(onStateChange) {
         const pickedObject = viewer.scene.pick(click.position);
 
         if (currentMode === 'select') {
-            // 1. Drop a moving entity
             if (movingEntity) {
                 if (liveMoveCartesian) {
                     const carto = Cesium.Cartographic.fromCartesian(liveMoveCartesian);
@@ -75,7 +74,6 @@ export function initMap(onStateChange) {
                 return;
             }
 
-            // 2. Select or enter Move mode
             if (Cesium.defined(pickedObject) && pickedObject.id && pickedObject.id.properties) {
                 const itemType = pickedObject.id.properties.type.getValue();
                 const itemId = pickedObject.id.properties.id.getValue();
@@ -108,7 +106,6 @@ export function initMap(onStateChange) {
             }
         }
 
-        // Handle Placement logic
         if (Cesium.defined(position) && currentMode !== 'select') {
             const cartographic = Cesium.Cartographic.fromCartesian(position);
             const lng = Cesium.Math.toDegrees(cartographic.longitude);
@@ -155,6 +152,55 @@ export function initMap(onStateChange) {
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 }
 
+function setupCameraControls() {
+    // 1. UI Buttons
+    document.getElementById('nav-zoom-in').addEventListener('click', () => {
+        viewer.camera.zoomIn(viewer.camera.positionCartographic.height * 0.2);
+    });
+    
+    document.getElementById('nav-zoom-out').addEventListener('click', () => {
+        viewer.camera.zoomOut(viewer.camera.positionCartographic.height * 0.2);
+    });
+    
+    document.getElementById('nav-tilt-up').addEventListener('click', () => {
+        viewer.camera.lookUp(Cesium.Math.toRadians(5));
+    });
+    
+    document.getElementById('nav-tilt-down').addEventListener('click', () => {
+        viewer.camera.lookDown(Cesium.Math.toRadians(5));
+    });
+
+    // 2. Smooth Keyboard Panning
+    const activeKeys = {};
+    
+    document.addEventListener('keydown', (e) => {
+        // Ignore key presses if user is typing in an input field (like altitude/radius)
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+        
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+            activeKeys[e.key] = true;
+            e.preventDefault(); // Stop the browser window from scrolling
+        }
+    });
+
+    document.addEventListener('keyup', (e) => {
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+            activeKeys[e.key] = false;
+        }
+    });
+
+    // Bind to the render loop for silky smooth 60fps movement
+    viewer.clock.onTick.addEventListener(() => {
+        const height = viewer.camera.positionCartographic.height;
+        const moveRate = height * 0.01; // Movement speed scales with altitude
+
+        if (activeKeys['ArrowUp']) viewer.camera.moveUp(moveRate);
+        if (activeKeys['ArrowDown']) viewer.camera.moveDown(moveRate);
+        if (activeKeys['ArrowLeft']) viewer.camera.moveLeft(moveRate);
+        if (activeKeys['ArrowRight']) viewer.camera.moveRight(moveRate);
+    });
+}
+
 export function resetOrbitState() {
     orbitStep = 0;
     orbitCenterCartesian = null;
@@ -188,7 +234,6 @@ export function redrawMap3D() {
     if (!viewer) return;
     viewer.entities.removeAll();
 
-    // 1. Render POIs
     pois.forEach((poi) => {
         const isMoving = movingEntity && movingEntity.type === 'poi' && movingEntity.id === poi.id;
         const isSelected = selectedPoiId === poi.id;
@@ -233,7 +278,6 @@ export function redrawMap3D() {
         });
     });
 
-    // 2. Render Waypoints
     waypoints.forEach((wp, index) => {
         const isMoving = movingEntity && movingEntity.type === 'wp' && movingEntity.id === wp.id;
         const isSelected = selectedWpIds.includes(wp.id);
@@ -277,7 +321,6 @@ export function redrawMap3D() {
             }
         });
 
-        // 3. Camera Pitch Line (to POI)
         if (wp.linkedPoiId !== 'none') {
             const targetPoi = pois.find(p => p.id === wp.linkedPoiId);
             if (targetPoi) {
@@ -305,7 +348,6 @@ export function redrawMap3D() {
         }
     });
 
-    // 4. Flight Path Line
     if (waypoints.length > 1) {
         viewer.entities.add({
             polyline: { 
