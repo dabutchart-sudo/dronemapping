@@ -161,15 +161,30 @@ export function redrawMap3D() {
     viewer.entities.removeAll();
 
     pois.forEach((poi) => {
+        const poiCartesian = Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, poi.altitude);
+        const groundCartesian = Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, 0);
+
+        // 1. Ground Shadow (Footprint)
         viewer.entities.add({
-            position: Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, poi.altitude),
+            position: groundCartesian,
+            point: { pixelSize: 10, color: Cesium.Color.BLACK.withAlpha(0.5), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND }
+        });
+
+        // 2. POI Marker
+        viewer.entities.add({
+            position: poiCartesian,
             properties: { type: 'poi', id: poi.id },
             point: { pixelSize: 12, color: Cesium.Color.ORANGE, outlineColor: Cesium.Color.WHITE, outlineWidth: 2, heightReference: Cesium.HeightReference.NONE },
             label: { text: `${poi.name}\n(${poi.altitude}m)`, font: '12pt sans-serif', fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -15) }
         });
         
+        // 3. Glowing Vertical Tether
         viewer.entities.add({
-            polyline: { positions: [Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, 0), Cesium.Cartesian3.fromDegrees(poi.lng, poi.lat, poi.altitude)], width: 1, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.ORANGE.withAlpha(0.5) }) }
+            polyline: { 
+                positions: [groundCartesian, poiCartesian], 
+                width: 4, 
+                material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.15, color: Cesium.Color.ORANGE }) 
+            }
         });
     });
 
@@ -177,10 +192,19 @@ export function redrawMap3D() {
     waypoints.forEach((wp, index) => {
         const isSelected = selectedWpIds.includes(wp.id);
         const color = isSelected ? Cesium.Color.YELLOW : Cesium.Color.DODGERBLUE;
+        
         const wpCartesian = Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, wp.altitude);
+        const groundCartesian = Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, 0);
         
         wpPositions.push(wpCartesian);
 
+        // 1. Ground Shadow (Footprint)
+        viewer.entities.add({
+            position: groundCartesian,
+            point: { pixelSize: isSelected ? 12 : 8, color: Cesium.Color.BLACK.withAlpha(0.6), heightReference: Cesium.HeightReference.CLAMP_TO_GROUND }
+        });
+
+        // 2. Waypoint Marker
         viewer.entities.add({
             position: wpCartesian,
             properties: { type: 'wp', id: wp.id },
@@ -188,10 +212,16 @@ export function redrawMap3D() {
             label: { text: `WP ${index + 1}\n(${wp.altitude}m)`, font: '12pt sans-serif', fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -15) }
         });
 
+        // 3. Glowing Vertical Tether
         viewer.entities.add({
-            polyline: { positions: [Cesium.Cartesian3.fromDegrees(wp.lng, wp.lat, 0), wpCartesian], width: 1, material: new Cesium.PolylineDashMaterialProperty({ color: color.withAlpha(0.4) }) }
+            polyline: { 
+                positions: [groundCartesian, wpCartesian], 
+                width: isSelected ? 6 : 3, 
+                material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.2, color: color }) 
+            }
         });
 
+        // Camera Pitch Line (to POI)
         if (wp.linkedPoiId !== 'none') {
             const targetPoi = pois.find(p => p.id === wp.linkedPoiId);
             if (targetPoi) {
@@ -202,6 +232,7 @@ export function redrawMap3D() {
         }
     });
 
+    // Flight Path Line
     if (wpPositions.length > 1) {
         viewer.entities.add({
             polyline: { positions: wpPositions, width: 4, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.CYAN }) }
