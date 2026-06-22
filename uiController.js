@@ -8,7 +8,6 @@ import { resetOrbitState } from './mapEngine.js';
 let notifyStateChange;
 
 // DOM Element Caches
-const modeSelectEl = document.getElementById('mode-select');
 const orbitSettingsPanel = document.getElementById('orbit-settings');
 const radiusInputEl = document.getElementById('orbit-radius');
 const globalSpeedEl = document.getElementById('global-speed');
@@ -22,18 +21,19 @@ const exportKmlBtn = document.getElementById('export-kml-btn');
 export function initUI(onStateChange) {
     notifyStateChange = onStateChange;
 
-    // Mode Switching
-    modeSelectEl.addEventListener('change', (e) => {
-        const mode = e.target.value;
-        setMode(mode);
-        orbitSettingsPanel.style.display = (mode === 'orbit') ? 'block' : 'none';
-        
-        if (mode === 'select') modeSelectEl.style.backgroundColor = '#34495e';
-        else if (mode === 'waypoint') modeSelectEl.style.backgroundColor = '#007bff';
-        else if (mode === 'poi') modeSelectEl.style.backgroundColor = '#e67e22';
-        else if (mode === 'orbit') modeSelectEl.style.backgroundColor = '#9b59b6';
-
-        resetOrbitState();
+    // Mode Switching via Toolbar
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const mode = e.currentTarget.dataset.mode;
+            setMode(mode);
+            
+            // Toggle settings panel based on mode
+            orbitSettingsPanel.style.display = (mode === 'orbit') ? 'block' : 'none';
+            
+            // Update UI visual state
+            updateModeUI(mode);
+            resetOrbitState();
+        });
     });
 
     globalSpeedEl.addEventListener('input', updateSidebarUI);
@@ -168,9 +168,10 @@ export function updateOrbitRadiusUI(val) {
     radiusInputEl.value = val;
 }
 
-export function setModeDropdown(val) {
-    modeSelectEl.value = val;
-    modeSelectEl.dispatchEvent(new Event('change'));
+export function updateModeUI(mode) {
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
 }
 
 export function updateSidebarUI() {
