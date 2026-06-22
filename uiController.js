@@ -8,8 +8,6 @@ import { resetOrbitState } from './mapEngine.js';
 let notifyStateChange;
 
 // DOM Element Caches
-const orbitSettingsPanel = document.getElementById('orbit-settings');
-const radiusInputEl = document.getElementById('orbit-radius');
 const globalSpeedEl = document.getElementById('global-speed');
 const overviewPanel = document.getElementById('mission-overview-panel');
 const editorPanel = document.getElementById('wp-editor-panel');
@@ -26,11 +24,6 @@ export function initUI(onStateChange) {
         btn.addEventListener('click', (e) => {
             const mode = e.currentTarget.dataset.mode;
             setMode(mode);
-            
-            // Toggle settings panel based on mode
-            orbitSettingsPanel.style.display = (mode === 'orbit') ? 'block' : 'none';
-            
-            // Update UI visual state
             updateModeUI(mode);
             resetOrbitState();
         });
@@ -96,7 +89,6 @@ export function initUI(onStateChange) {
         notifyStateChange();
     });
 
-    // Reordering & Deletion
     document.getElementById('wp-move-up').addEventListener('click', () => { 
         if (selectedWpIds.length !== 1) return; 
         moveWaypoint(waypoints.findIndex(w => w.id === selectedWpIds[0]), -1); 
@@ -115,7 +107,6 @@ export function initUI(onStateChange) {
         notifyStateChange();
     });
 
-    // Navigator
     document.getElementById('nav-prev').addEventListener('click', () => {
         if (selectedWpIds.length !== 1) return;
         let idx = waypoints.findIndex(w => w.id === selectedWpIds[0]);
@@ -128,7 +119,6 @@ export function initUI(onStateChange) {
         if (idx < waypoints.length - 1) { setSelectedWpIds([waypoints[idx + 1].id]); notifyStateChange(); }
     });
 
-    // Actions
     document.getElementById('add-action-btn').addEventListener('click', () => {
         if (selectedWpIds.length !== 1) return;
         const wp = waypoints.find(w => w.id === selectedWpIds[0]);
@@ -156,16 +146,35 @@ export function initUI(onStateChange) {
     });
 }
 
-export function getOrbitParams() {
-    return {
-        radiusMeters: parseFloat(radiusInputEl.value),
-        altitude: parseFloat(document.getElementById('orbit-alt').value),
-        photoCount: parseInt(document.getElementById('orbit-count').value)
-    };
-}
+// Shows the modal dialog for Orbit generation confirmation
+export function promptOrbitParams(defaultRadius, onConfirm, onCancel) {
+    document.getElementById('popup-orbit-radius').value = Math.round(defaultRadius);
+    document.getElementById('orbit-popup').style.display = 'flex';
 
-export function updateOrbitRadiusUI(val) {
-    radiusInputEl.value = val;
+    const okBtn = document.getElementById('orbit-ok-btn');
+    const cancelBtn = document.getElementById('orbit-cancel-btn');
+
+    const newOkBtn = okBtn.cloneNode(true);
+    const newCancelBtn = cancelBtn.cloneNode(true);
+    okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+
+    const closePopup = () => {
+        document.getElementById('orbit-popup').style.display = 'none';
+    };
+
+    newOkBtn.addEventListener('click', () => {
+        const radius = parseFloat(document.getElementById('popup-orbit-radius').value);
+        const altitude = parseFloat(document.getElementById('popup-orbit-alt').value);
+        const count = parseInt(document.getElementById('popup-orbit-count').value);
+        closePopup();
+        onConfirm({ radiusMeters: radius, altitude, photoCount: count });
+    });
+
+    newCancelBtn.addEventListener('click', () => {
+        closePopup();
+        onCancel();
+    });
 }
 
 export function updateModeUI(mode) {
