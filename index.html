@@ -6,14 +6,14 @@
     <title>DJI Fly 3D Mission Planner</title>
     <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
     <link href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=24">
+    <link rel="stylesheet" href="style.css?v=25">
 </head>
 <body>
 
     <div id="sidebar">
         <div style="display: flex; justify-content: space-between; align-items: baseline;">
             <h2 style="margin-bottom: 0;">DJI Fly 3D Planner</h2>
-            <span style="font-size: 10px; color: #95a5a6; font-weight: bold;">v24 (Cesium)</span>
+            <span style="font-size: 10px; color: #95a5a6; font-weight: bold;">v25 (Cesium)</span>
         </div>
         
         <div id="mission-hud" style="background: #eafaf1; border: 1px solid #2ecc71; border-radius: 6px; padding: 10px; margin-top: 10px; margin-bottom: 10px;">
@@ -22,18 +22,9 @@
         </div>
 
         <div class="global-controls">
-            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-bottom: 10px;">
+            <div style="display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 10px;">
                 <div class="input-group">
-                    <label style="font-weight: bold; color: #2c3e50;">Action Mode</label>
-                    <select id="mode-select" class="mode-dropdown">
-                        <option value="select">Select / Edit Mode</option>
-                        <option value="waypoint" selected>Place Waypoints</option>
-                        <option value="poi">Place POIs</option>
-                        <option value="orbit">Generate Orbit</option>
-                    </select>
-                </div>
-                <div class="input-group">
-                    <label style="font-weight: bold; color: #2c3e50;">Speed (m/s)</label>
+                    <label style="font-weight: bold; color: #2c3e50;">Global Speed (m/s)</label>
                     <input type="number" id="global-speed" value="5" min="1" max="15" step="0.5" style="font-weight: bold;">
                 </div>
             </div>
@@ -121,6 +112,13 @@
 
     <div id="map-container">
         <div id="map"></div>
+        
+        <div id="map-mode-toolbar">
+            <button class="mode-btn" data-mode="select" title="Select / Edit Mode">👆 Edit</button>
+            <button class="mode-btn active" data-mode="waypoint" title="Place Waypoints">📍 Add WP</button>
+            <button class="mode-btn" data-mode="poi" title="Place POIs">🎯 Add POI</button>
+            <button class="mode-btn" data-mode="orbit" title="Generate Orbit">🔄 Orbit</button>
+        </div>
         
         <div id="map-export-controls">
             <button id="export-dji-btn" class="export-btn" disabled>Export KMZ</button>
