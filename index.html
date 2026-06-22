@@ -6,14 +6,14 @@
     <title>DJI Fly 3D Mission Planner</title>
     <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
     <link href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=22">
+    <link rel="stylesheet" href="style.css?v=23">
 </head>
 <body>
 
     <div id="sidebar">
         <div style="display: flex; justify-content: space-between; align-items: baseline;">
             <h2 style="margin-bottom: 0;">DJI Fly 3D Planner</h2>
-            <span style="font-size: 10px; color: #95a5a6; font-weight: bold;">v22 (Cesium)</span>
+            <span style="font-size: 10px; color: #95a5a6; font-weight: bold;">v23 (Cesium)</span>
         </div>
         
         <div id="mission-hud" style="background: #eafaf1; border: 1px solid #2ecc71; border-radius: 6px; padding: 10px; margin-top: 10px; margin-bottom: 10px;">
@@ -51,12 +51,6 @@
             <div class="action-buttons">
                 <button id="undo-btn" class="secondary-btn">Undo Last</button>
                 <button id="clear-btn" class="danger-btn">Clear All</button>
-            </div>
-            
-            <div class="export-buttons">
-                <button id="export-dji-btn" class="export-btn" disabled>DJI KMZ</button>
-                <button id="export-litchi-btn" class="export-btn" disabled>Litchi CSV</button>
-                <button id="export-kml-btn" class="export-btn" disabled>GE KML</button> </div>
             </div>
         </div>
 
@@ -127,6 +121,11 @@
 
     <div id="map-container">
         <div id="map"></div>
+        <div id="map-export-controls">
+            <button id="export-dji-btn" class="export-btn" disabled>Export KMZ</button>
+            <button id="export-litchi-btn" class="export-btn" disabled>Export CSV</button>
+            <button id="export-kml-btn" class="export-btn" disabled>Export KML</button>
+        </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
